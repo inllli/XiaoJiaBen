@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "XiaoJiaBen",
-    "slug": "XiaoJiaBen",
+    "name": "小家本",
+    "slug": "xiaojiaben-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.yourname.xiaojiaoben",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -19,6 +20,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "92240fde-07da-4230-8e46-41df4f3349e4"
+      }
+    },
+    "owner": "xiaojiaben"
   }
 }
