@@ -2,7 +2,7 @@
   "expo": {
     "name": "小家本",
     "slug": "xiaojiaben-app",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,11 +10,13 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.yourname.xiaojiaoben",
+      "package": "com.Yjia.xiaojiaoben",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/icon.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       }
     },

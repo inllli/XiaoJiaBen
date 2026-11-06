@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local backups & release packages (do not commit)
+backups/
+*.apk
+src/**/*.bak*
