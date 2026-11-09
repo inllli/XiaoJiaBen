@@ -56,13 +56,13 @@ export async function checkUpdate() {
     }
 }
 
-// 国内直连 github.com 的 release 附件经常不通（api.github.com 却能连），
-// 所以下载按顺序尝试：直连 → 几个 GitHub 加速镜像 → 全失败才提示开 VPN
+// 国内直连 github.com 的 release 附件经常不通或极慢（api.github.com 却能连），
+// 所以下载按顺序尝试：两个 GitHub 加速镜像 → 直连兜底 → 全失败才提示开 VPN。
+// 现有顺序是实测结果：gh-proxy.com 最快（约 760KB/s），ghfast.top 次之（约 250KB/s），直连最慢
 const APK_MIRRORS = [
-    '',
-    'https://ghfast.top/',
-    'https://ghproxy.net/',
     'https://gh-proxy.com/',
+    'https://ghfast.top/',
+    '',
 ];
 
 // 下载 APK 并调起系统安装器（仅 Android；iOS 请走 App Store）
