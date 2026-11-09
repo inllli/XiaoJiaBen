@@ -185,10 +185,10 @@ export default function ImageCropModal({ visible, uri, onCancel, onConfirm }) {
                     </View>
                     <View style={styles.btnRow}>
                         <TouchableOpacity style={[styles.btn, { backgroundColor: tc.cardSubBg }]} onPress={onCancel}>
-                            <Text style={[styles.btnCancelText, { color: tc.textSub }]}>取消</Text>
+                            <Text style={[styles.btnCancelText, { color: tc.labelText }]}>取消</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.btn, { backgroundColor: COLORS.primaryGreen }]} onPress={confirmCrop}>
-                            <Text style={styles.btnConfirmText}>确定</Text>
+                        <TouchableOpacity style={[styles.btn, { backgroundColor: tc.accent }]} onPress={confirmCrop}>
+                            <Text style={[styles.btnConfirmText, { color: tc.accentText }]}>确定</Text>
                         </TouchableOpacity>
                     </View>
                 </View>

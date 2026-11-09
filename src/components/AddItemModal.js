@@ -7,6 +7,9 @@ import ImageCropModal from './ImageCropModal';
 import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS } from '../theme';
 
+// 是否为真实图片封面（file / content / http / data:image），否则视为模板 emoji
+const isCoverUri = (c) => typeof c === 'string' && /^(file|content|http|data:image)/.test(c);
+
 export default function AddItemModal({ visible, onClose, editItem, editHabit }) {
     const { addItem, editItem: updateItem, addHabit, editHabit: updateHabit, deleteHabit, customOptions, addCustomOption, showToast, addLogEntry, themeColors: tc } = useContext(AppContext);
     const [isEditMode, setIsEditMode] = useState(false);
@@ -18,7 +21,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
     const [itemCovers, setItemCovers] = useState(['🥛']);
     // 待裁切图片：{ uri, isMed }；null 表示未在裁切
     const [cropState, setCropState] = useState(null);
-    const [medForm, setMedForm] = useState({ name: '', dose: '1', freq: '', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', locations: [], purpose: '', threshold: '', expireDays: '' });
+    const [medForm, setMedForm] = useState({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', locations: [], purpose: '', threshold: '', expireDays: '' });
     const [habitForm, setHabitForm] = useState({ name: '', quickCheckIn: false, tags: [], icon: '⭐', frequency: '', startDate: '', endDate: '' });
 
     const [showCustomCategory, setShowCustomCategory] = useState(false);
@@ -91,7 +94,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                 if (editItem.category === '药品') {
                     setActiveTab('medicine');
                     setMedForm({
-                        name: editItem.name, dose: editItem.dose || '1', freq: editItem.freq || '', time: editItem.time || '08:30',
+                        name: editItem.name, dose: editItem.dose || '1', freq: editItem.freq || '', timing: editItem.timing || '不限', time: editItem.time || '08:30',
                         stock: editItem.stock ? editItem.stock.toString() : '0', remark: editItem.remark || '',
                         noExpire: editItem.noExpire !== undefined ? editItem.noExpire : true,
                         expireDate: editItem.expireDate || '', covers: editItem.covers || [editItem.cover || '💊'],
@@ -129,7 +132,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                 setActiveTab('item');
                 setItemForm({ name: '', stock: '1.0', unit: '盒', category: '食品', threshold: '', expireDays: '', noExpire: true, expireDate: '', purpose: '', remark: '', enableCheckIn: false, associateInventory: false });
                 setItemCovers(['🥛']); setItemLocations([]);
-                setMedForm({ name: '', dose: '1', freq: '', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', purpose: '' });
+                setMedForm({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', purpose: '' });
                 setHabitForm({ name: '', quickCheckIn: false, tags: [], icon: '⭐', frequency: '', startDate: '', endDate: '' });
                 setShowCustomCategory(false); setCustomCategory(''); setShowCustomUnit(false); setCustomUnit('');
                 setShowCustomLocation(false); setCustomLocation(''); setShowCustomMedUnit(false); setCustomMedUnit('');
@@ -158,10 +161,10 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
             if (showCustomUnit && customUnit && addCustomOption) addCustomOption('itemUnits', customUnit);
             if (showCustomCategory && customCategory && addCustomOption) addCustomOption('categories', customCategory);
 
-            // 数据清洗：剔除失效封面；只要存在真实图片，就去掉旧的 emoji 兜底（避免首页图片+纸箱混着轮播）
+            // 数据清洗：剔除失效封面；模板 emoji 与真实图片可共存，不再二选一
             const aliveItemCovers = itemCovers.filter(c => !brokenCovers.includes(c));
-            const realItemCovers = aliveItemCovers.filter(c => typeof c === 'string' && /^(file|content|http|data:image)/.test(c));
-            const visibleItemCovers = realItemCovers.length > 0 ? realItemCovers : (aliveItemCovers.length > 0 ? aliveItemCovers : ['📦']);
+            const dedupItemCovers = Array.from(new Set(aliveItemCovers));
+            const visibleItemCovers = dedupItemCovers.length > 0 ? dedupItemCovers : ['📦'];
             const finalData = {
                 ...itemForm,
                 name: itemForm.name.trim(),
@@ -189,8 +192,8 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
             if (showCustomMedUnit && customMedUnit && addCustomOption) addCustomOption('medUnits', customMedUnit);
             if (showCustomMedFreq && customMedFreq && addCustomOption) addCustomOption('medFrequencies', customMedFreq);
             const aliveMedCovers = medForm.covers.filter(c => !brokenCovers.includes(c));
-            const realMedCovers = aliveMedCovers.filter(c => typeof c === 'string' && /^(file|content|http|data:image)/.test(c));
-            const visibleMedCovers = realMedCovers.length > 0 ? realMedCovers : (aliveMedCovers.length > 0 ? aliveMedCovers : ['💊']);
+            const dedupMedCovers = Array.from(new Set(aliveMedCovers));
+            const visibleMedCovers = dedupMedCovers.length > 0 ? dedupMedCovers : ['💊'];
             const finalData = {
                 ...medForm,
                 name: medForm.name.trim(),
@@ -243,7 +246,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
         if (!result.canceled) setCropState({ uri: result.assets[0].uri, isMed });
     };
 
-    const renderTagGroup = (options, selected, onSelect, isCustom, onCustomSelect, showCustomInput, customValue, setCustomValue) => (
+    const renderTagGroup = (options, selected, onSelect, isCustom, onCustomSelect, showCustomInput, customValue, setCustomValue, onCustomDone) => (
         <View>
             <View style={styles.tagGroup}>
                 {options.map(opt => (
@@ -253,7 +256,22 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                 ))}
                 {onCustomSelect && <TouchableOpacity style={[styles.tag, isCustom && styles.tagActive]} onPress={onCustomSelect}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, isCustom && styles.tagTextActive]}>+ 自定义</Text></TouchableOpacity>}
             </View>
-            {showCustomInput && <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, marginTop: 10 }]} placeholder="输入自定义内容" value={customValue} onChangeText={setCustomValue} />}
+            {showCustomInput && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    <TextInput
+                        placeholderTextColor={tc.textSub}
+                        style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, flex: 1, marginTop: 0 }]}
+                        placeholder="输入自定义内容"
+                        value={customValue}
+                        onChangeText={setCustomValue}
+                        onSubmitEditing={onCustomDone}
+                        returnKeyType="done"
+                    />
+                    <TouchableOpacity style={[styles.addTagBtn, { backgroundColor: tc.accent }]} onPress={onCustomDone}>
+                        <Text style={{ color: tc.accentText, fontWeight: '600' }}>完成</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 
@@ -288,7 +306,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                             <Text style={[styles.label, { color: tc.textMain }]}>选择模板</Text>
                             <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} style={styles.templateScroll}>
                                 {itemTemplates.slice(0, showAllItemTemplates ? itemTemplates.length : 20).map((item, index) => (
-                                    <TouchableOpacity key={index} style={[styles.templateItem, { backgroundColor: tc.cardBg }, itemCovers.includes(item) && styles.templateItemActive]} onPress={() => setItemCovers([item])}><Text style={{ fontSize: 24 }}>{item}</Text></TouchableOpacity>
+                                    <TouchableOpacity key={index} style={[styles.templateItem, { backgroundColor: tc.cardBg }, itemCovers.includes(item) && styles.templateItemActive]} onPress={() => setItemCovers(prev => [...prev.filter(c => isCoverUri(c)), item])}><Text style={{ fontSize: 24 }}>{item}</Text></TouchableOpacity>
                                 ))}
                             </ScrollView>
                             <TouchableOpacity onPress={() => setShowAllItemTemplates(!showAllItemTemplates)} style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, justifyContent: 'center', marginTop: 10 }]}>
@@ -299,7 +317,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                             <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]} placeholder="请输入物品名称" value={itemForm.name} onChangeText={t => setItemForm({ ...itemForm, name: t })} />
 
                             <Text style={[styles.label, { color: tc.textMain }]}>分类</Text>
-                            {renderTagGroup(optCategories, (showCustomCategory && customCategory) ? customCategory : itemForm.category, t => { setShowCustomCategory(false); setCustomCategory(''); setItemForm({ ...itemForm, category: t }); }, showCustomCategory, () => setShowCustomCategory(!showCustomCategory), showCustomCategory, customCategory, setCustomCategory)}
+                            {renderTagGroup(optCategories, (showCustomCategory && customCategory) ? customCategory : itemForm.category, t => { setShowCustomCategory(false); setCustomCategory(''); setItemForm({ ...itemForm, category: t }); }, showCustomCategory, () => setShowCustomCategory(!showCustomCategory), showCustomCategory, customCategory, setCustomCategory, () => { const v = (customCategory || '').trim(); if (!v) return; if (addCustomOption) addCustomOption('categories', v); setItemForm({ ...itemForm, category: v }); setCustomCategory(''); setShowCustomCategory(false); })}
 
                             <Text style={[styles.label, { color: tc.textMain }]}>库存数量</Text>
                             <View style={[styles.stockControl, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
@@ -311,7 +329,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                             </View>
 
                             <Text style={[styles.label, { color: tc.textMain }]}>单位</Text>
-                            {renderTagGroup(optItemUnits, (showCustomUnit && customUnit) ? customUnit : showCustomUnit ? 'custom' : itemForm.unit, t => { if (t !== 'custom') { setShowCustomUnit(false); setItemForm({ ...itemForm, unit: t }); } }, showCustomUnit, () => setShowCustomUnit(!showCustomUnit), showCustomUnit, customUnit, setCustomUnit)}
+                            {renderTagGroup(optItemUnits, (showCustomUnit && customUnit) ? customUnit : showCustomUnit ? 'custom' : itemForm.unit, t => { if (t !== 'custom') { setShowCustomUnit(false); setItemForm({ ...itemForm, unit: t }); } }, showCustomUnit, () => setShowCustomUnit(!showCustomUnit), showCustomUnit, customUnit, setCustomUnit, () => { const v = (customUnit || '').trim(); if (!v) return; if (addCustomOption) addCustomOption('itemUnits', v); setItemForm({ ...itemForm, unit: v }); setCustomUnit(''); setShowCustomUnit(false); })}
 
                             <Text style={[styles.label, { color: tc.textMain }]}>存放位置（可多选）</Text>
                             <View style={styles.tagGroup}>
@@ -325,7 +343,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                             {showCustomLocation && (
                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
                                     <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, flex: 1 }]} placeholder="请输入自定义内容" value={customLocation} onChangeText={setCustomLocation} />
-                                    <TouchableOpacity style={styles.addTagBtn} onPress={() => { if (customLocation.trim()) { setItemLocations([...itemLocations, customLocation.trim()]); addCustomOption && addCustomOption('itemLocations', customLocation.trim()); setCustomLocation(''); setShowCustomLocation(false); } }}><Text style={{ color: '#fff', fontWeight: '600' }}>完成</Text></TouchableOpacity>
+                                    <TouchableOpacity style={[styles.addTagBtn, { backgroundColor: tc.accent }]} onPress={() => { if (customLocation.trim()) { setItemLocations([...itemLocations, customLocation.trim()]); addCustomOption && addCustomOption('itemLocations', customLocation.trim()); setCustomLocation(''); setShowCustomLocation(false); } }}><Text style={{ color: tc.accentText, fontWeight: '600' }}>完成</Text></TouchableOpacity>
                                 </View>
                             )}
 
@@ -405,16 +423,23 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                             </View>
 
                             <Text style={[styles.label, { color: tc.textMain }]}>单位</Text>
-                            {renderTagGroup(optMedUnits, (showCustomMedUnit && customMedUnit) ? customMedUnit : showCustomMedUnit ? 'custom' : medForm.unit, t => { if (t !== 'custom') { setShowCustomMedUnit(false); setMedForm({ ...medForm, unit: t }); } }, showCustomMedUnit, () => setShowCustomMedUnit(!showCustomMedUnit), showCustomMedUnit, customMedUnit, setCustomMedUnit)}
+                            {renderTagGroup(optMedUnits, (showCustomMedUnit && customMedUnit) ? customMedUnit : showCustomMedUnit ? 'custom' : medForm.unit, t => { if (t !== 'custom') { setShowCustomMedUnit(false); setMedForm({ ...medForm, unit: t }); } }, showCustomMedUnit, () => setShowCustomMedUnit(!showCustomMedUnit), showCustomMedUnit, customMedUnit, setCustomMedUnit, () => { const v = (customMedUnit || '').trim(); if (!v) return; if (addCustomOption) addCustomOption('medUnits', v); setMedForm({ ...medForm, unit: v }); setCustomMedUnit(''); setShowCustomMedUnit(false); })}
 
                             <Text style={[styles.label, { color: tc.textMain }]}>服用频数（非必选）</Text>
-                            {renderTagGroup(optMedFrequencies, (showCustomMedFreq && customMedFreq) ? customMedFreq : showCustomMedFreq ? 'custom' : medForm.freq, t => { if (t !== 'custom') { setShowCustomMedFreq(false); setMedForm({ ...medForm, freq: t }); } }, showCustomMedFreq, () => setShowCustomMedFreq(!showCustomMedFreq), showCustomMedFreq, customMedFreq, setCustomMedFreq)}
+                            {renderTagGroup(optMedFrequencies, (showCustomMedFreq && customMedFreq) ? customMedFreq : showCustomMedFreq ? 'custom' : medForm.freq, t => { if (t !== 'custom') { setShowCustomMedFreq(false); setMedForm({ ...medForm, freq: t }); } }, showCustomMedFreq, () => setShowCustomMedFreq(!showCustomMedFreq), showCustomMedFreq, customMedFreq, setCustomMedFreq, () => { const v = (customMedFreq || '').trim(); if (!v) return; if (addCustomOption) addCustomOption('medFrequencies', v); setMedForm({ ...medForm, freq: v }); setCustomMedFreq(''); setShowCustomMedFreq(false); })}
 
                             <Text style={[styles.label, { color: tc.textMain }]}>服用时机</Text>
-                            {<TouchableOpacity style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, justifyContent: 'center' }]} onPress={() => setShowMedTimePicker(true)}>
-                                <Text style={{ color: medForm.time && medForm.time !== '00:00' ? tc.textMain : tc.textLight }}>{medForm.time || '选择时间'}</Text>
-                            </TouchableOpacity>}
-                            {showMedTimePicker && <DateTimePicker value={medForm.time && medForm.time !== '00:00' ? new Date('2000-01-01T' + medForm.time + ':00') : new Date()} mode="time" display="spinner" themeVariant="light" is24Hour={true} onChange={(event, selectedDate) => { setShowMedTimePicker(false); if (selectedDate) { const h = String(selectedDate.getHours()).padStart(2, '0'); const m = String(selectedDate.getMinutes()).padStart(2, '0'); setMedForm({ ...medForm, time: h + ':' + m }); } }} />}
+                            <View style={styles.tagGroup}>
+                                {['饭前', '随餐', '饭后', '不限'].map(opt => (
+                                    <TouchableOpacity key={opt} style={[styles.tag, medForm.timing === opt && styles.tagActive]} onPress={() => setMedForm({ ...medForm, timing: opt })}>
+                                        <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.timing === opt && styles.tagTextActive]}>{opt}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                                <TouchableOpacity style={[styles.tag, medForm.timing === '固定时间' && styles.tagActive]} onPress={() => setShowMedTimePicker(true)}>
+                                    <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.timing === '固定时间' && styles.tagTextActive]}>{medForm.timing === '固定时间' ? (medForm.time || '固定时间') : '固定时间'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            {showMedTimePicker && <DateTimePicker value={medForm.time && medForm.time !== '00:00' ? new Date('2000-01-01T' + medForm.time + ':00') : new Date()} mode="time" display="spinner" themeVariant="light" is24Hour={true} onChange={(event, selectedDate) => { setShowMedTimePicker(false); if (event && event.type === 'dismissed') return; if (selectedDate) { const h = String(selectedDate.getHours()).padStart(2, '0'); const m = String(selectedDate.getMinutes()).padStart(2, '0'); setMedForm({ ...medForm, timing: '固定时间', time: h + ':' + m }); } }} />}
 
                             <View style={{ marginTop: 20 }}>
                                 <Text style={[styles.label, { color: tc.textMain }]}>存放位置（可多选）</Text>
@@ -435,7 +460,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 {showCustomMedLocation && (
                                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
                                         <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, flex: 1 }]} placeholder="请输入自定义内容" value={customMedLocation} onChangeText={setCustomMedLocation} />
-                                        <TouchableOpacity style={styles.addTagBtn} onPress={() => {
+                                        <TouchableOpacity style={[styles.addTagBtn, { backgroundColor: tc.accent }]} onPress={() => {
                                             if (customMedLocation.trim()) {
                                                 const locs = medForm.locations || [];
                                                 setMedForm({ ...medForm, locations: [...locs, customMedLocation.trim()] });
@@ -443,7 +468,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                                 setCustomMedLocation('');
                                                 setShowCustomMedLocation(false);
                                             }
-                                        }}><Text style={{ color: '#fff', fontWeight: '600' }}>完成</Text></TouchableOpacity>
+                                        }}><Text style={{ color: tc.accentText, fontWeight: '600' }}>完成</Text></TouchableOpacity>
                                     </View>
                                 )}
 
@@ -493,7 +518,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 <View style={styles.iconGrid}>{habitIcons.map(icon => <TouchableOpacity key={icon} style={[styles.iconItem, { backgroundColor: tc.cardBg }, habitForm.icon === icon && styles.iconItemActive]} onPress={() => setHabitForm({ ...habitForm, icon })}><Text style={{ fontSize: 22 }}>{icon}</Text></TouchableOpacity>)}</View>
 
                                 <Text style={[styles.label, { color: tc.textMain }]}>打卡频次</Text>
-                                {renderTagGroup(['每日1次', '每日2次', '隔日', '每周几次', '每天多次'], (showCustomHabitFreq && customHabitFreq) ? customHabitFreq : showCustomHabitFreq ? 'custom' : habitForm.frequency, t => { if (t !== 'custom') { setShowCustomHabitFreq(false); setHabitForm({ ...habitForm, frequency: t }); } }, showCustomHabitFreq, () => setShowCustomHabitFreq(!showCustomHabitFreq), showCustomHabitFreq, customHabitFreq, setCustomHabitFreq)}
+                                {renderTagGroup(['每日1次', '每日2次', '隔日', '每周几次', '每天多次'], (showCustomHabitFreq && customHabitFreq) ? customHabitFreq : showCustomHabitFreq ? 'custom' : habitForm.frequency, t => { if (t !== 'custom') { setShowCustomHabitFreq(false); setHabitForm({ ...habitForm, frequency: t }); } }, showCustomHabitFreq, () => setShowCustomHabitFreq(!showCustomHabitFreq), showCustomHabitFreq, customHabitFreq, setCustomHabitFreq, () => { const v = (customHabitFreq || '').trim(); if (v) setHabitForm({ ...habitForm, frequency: v }); setCustomHabitFreq(''); setShowCustomHabitFreq(false); })}
 
                                 <Text style={[styles.label, { color: tc.textMain }]}>打卡期限</Text>
                                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -522,7 +547,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 <Text style={[styles.label, { color: tc.textMain }]}>打卡标签（输入后点“完成”新增）</Text>
                                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                                     <TextInput placeholderTextColor={tc.textSub} style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, flex: 1 }]} value={newTagInput} onChangeText={setNewTagInput} placeholder="请输入标签内容" />
-                                    <TouchableOpacity style={styles.addTagBtn} onPress={() => { if (newTagInput.trim() && !habitForm.tags.includes(newTagInput.trim())) { setHabitForm({ ...habitForm, tags: [...habitForm.tags, newTagInput.trim()] }); setNewTagInput(''); } }}><Text style={{ color: '#fff', fontWeight: '600' }}>完成</Text></TouchableOpacity>
+                                    <TouchableOpacity style={[styles.addTagBtn, { backgroundColor: tc.accent }]} onPress={() => { if (newTagInput.trim() && !habitForm.tags.includes(newTagInput.trim())) { setHabitForm({ ...habitForm, tags: [...habitForm.tags, newTagInput.trim()] }); setNewTagInput(''); } }}><Text style={{ color: tc.accentText, fontWeight: '600' }}>完成</Text></TouchableOpacity>
                                 </View>
                                 <View style={styles.tagGroup}>
                                     {habitForm.tags.map(tag => (
@@ -540,7 +565,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                         )}
                     </ScrollView>
 
-                    <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Text style={styles.saveBtnText}>保存</Text></TouchableOpacity>
+                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.accent }]} onPress={handleSave}><Text style={[styles.saveBtnText, { color: tc.accentText }]}>保存</Text></TouchableOpacity>
                 </View >
             </KeyboardAvoidingView >
 
@@ -569,15 +594,15 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                         <TouchableOpacity
                                             key={index}
                                             style={[styles.templatePickerItem, { backgroundColor: tc.cardBg }, itemCovers.includes(item) && styles.templateItemActive]}
-                                            onPress={() => { setItemCovers([item]); setShowAllItemTemplates(false); }}
+                                            onPress={() => { setItemCovers(prev => [...prev.filter(c => isCoverUri(c)), item]); setShowAllItemTemplates(false); }}
                                         >
                                             <Text style={{ fontSize: 24 }}>{item}</Text>
                                         </TouchableOpacity>
                                     ))}
                                 </View>
                             </ScrollView>
-                            <TouchableOpacity onPress={() => setShowAllItemTemplates(false)} style={styles.templatePickerClose}>
-                                <Text style={styles.templatePickerCloseText}>关闭</Text>
+                            <TouchableOpacity onPress={() => setShowAllItemTemplates(false)} style={[styles.templatePickerClose, { backgroundColor: tc.accent }]}>
+                                <Text style={[styles.templatePickerCloseText, { color: tc.accentText }]}>关闭</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -591,7 +616,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                     <View style={[styles.confirmBox, { backgroundColor: tc.modalBg }]}>
                         <Text style={[styles.confirmTitle, { color: tc.textMain }]}>退出{isEditMode ? '编辑' : '添加'}</Text>
                         <Text style={[styles.confirmMsg, { color: tc.textSub }]}>尚未保存的修改将丢失，请选择退出方式</Text>
-                        <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={() => { setExitConfirmVisible(false); handleSave(); }}><Text style={{ color: '#fff', fontWeight: '600' }}>保存并退出</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: tc.accent }]} onPress={() => { setExitConfirmVisible(false); handleSave(); }}><Text style={{ color: tc.accentText, fontWeight: '600' }}>保存并退出</Text></TouchableOpacity>
                         <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => { setExitConfirmVisible(false); if (onClose) onClose(); }}><Text style={{ color: tc.textMain, fontWeight: '600' }}>仅退出</Text></TouchableOpacity>
                         <TouchableOpacity onPress={() => setExitConfirmVisible(false)}><Text style={{ color: tc.textSub, textAlign: 'center', marginTop: 12 }}>取消</Text></TouchableOpacity>
                     </View>

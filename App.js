@@ -26,10 +26,10 @@ function MainTabs() {
       <NavigationContainer>
         <Tab.Navigator
           screenOptions={({ route }) => ({
-            headerShown: false, tabBarActiveTintColor: COLORS.primaryGreen, tabBarInactiveTintColor: tc.textSub,
+            headerShown: false, tabBarActiveTintColor: tc.accent, tabBarInactiveTintColor: tc.textSub,
             // 左右滑动切换 Tab（“左滑右滑返回上一层”的手势支持）
             swipeEnabled: true,
-            tabBarStyle: { height: 75, paddingBottom: 15, paddingTop: 10, backgroundColor: tc.isDark ? 'rgba(52, 55, 60, 0.96)' : 'rgba(255, 255, 255, 0.95)', borderTopWidth: 0, ...SHADOWS.nav },
+            tabBarStyle: { height: 75, paddingBottom: 15, paddingTop: 10, backgroundColor: tc.navBg, borderTopWidth: 0, ...SHADOWS.nav },
             tabBarLabel: ({ color, focused }) => <Text style={{ fontSize: 11, color: color, marginTop: 4, fontWeight: focused ? '600' : '400' }}>{route.name}</Text>,
             tabBarIcon: ({ focused, color }) => {
               let iconName;
@@ -48,8 +48,8 @@ function MainTabs() {
         </Tab.Navigator>
       </NavigationContainer>
 
-      <TouchableOpacity style={styles.globalAddBtn} onPress={() => setGlobalAddVisible(true)}>
-        <Text style={{ color: '#fff', fontSize: 28, fontWeight: '300', marginTop: -2 }}>+</Text>
+      <TouchableOpacity style={[styles.globalAddBtn, { backgroundColor: tc.accent }]} onPress={() => setGlobalAddVisible(true)}>
+        <Text style={{ color: tc.accentText, fontSize: 28, fontWeight: '300', marginTop: -2 }}>+</Text>
       </TouchableOpacity>
 
       <AddItemModal visible={globalAddVisible} onClose={() => setGlobalAddVisible(false)} />

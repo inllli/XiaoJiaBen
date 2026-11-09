@@ -14,6 +14,7 @@ export const AppProvider = ({ children }) => {
     const [habits, setHabits] = useState([]);
     const [calendarData, setCalendarData] = useState({});
     const [themeBg, setThemeBg] = useState('#f7f6f1');
+    const [nickname, setNickname] = useState('');
     // 依据主题背景色明暗派生的整套页面配色（字体/卡片/组件随主题联动）
     const themeColors = useMemo(() => getThemeColors(themeBg), [themeBg]);
 
@@ -66,11 +67,13 @@ export const AppProvider = ({ children }) => {
                 const savedCalendar = await AsyncStorage.getItem('calendarData');
                 const savedOptions = await AsyncStorage.getItem('customOptions');
                 const savedThemeBg = await AsyncStorage.getItem('themeBg');
+                const savedNickname = await AsyncStorage.getItem('nickname');
 
                 if (savedInventory) setInventory(JSON.parse(savedInventory));
                 if (savedHabits) setHabits(JSON.parse(savedHabits));
                 if (savedCalendar) setCalendarData(JSON.parse(savedCalendar));
                 if (savedThemeBg) setThemeBg(savedThemeBg);
+                if (savedNickname) setNickname(savedNickname);
 
                 // 数据迁移逻辑：兼容旧版 customOptions 结构
                 let options = customOptions;
@@ -320,7 +323,8 @@ export const AppProvider = ({ children }) => {
             if (sanitized.category === '药品') {
                 if (oldItem.dose !== sanitized.dose) changeDetails.push('剂量 ' + (oldItem.dose || '未设置') + '→' + sanitized.dose);
                 if (oldItem.freq !== sanitized.freq) changeDetails.push('频次 ' + (oldItem.freq || '未设置') + '→' + sanitized.freq);
-                if (oldItem.time !== sanitized.time) changeDetails.push('服用时机 ' + (oldItem.time || '未设置') + '→' + sanitized.time);
+                if ((oldItem.timing || '') !== (sanitized.timing || '')) changeDetails.push('服用时机 ' + (oldItem.timing || '不限') + '→' + (sanitized.timing || '不限'));
+                if (sanitized.timing === '固定时间' && oldItem.time !== sanitized.time) changeDetails.push('服用时间 ' + (oldItem.time || '未设置') + '→' + (sanitized.time || '未设置'));
             }
         }
         const changeText = changeDetails.length > 0 ? changeDetails.join('；') : '信息更新';
@@ -482,8 +486,17 @@ export const AppProvider = ({ children }) => {
         showToast(itemName + ' 打卡成功');
     };
 
+    // 昵称：最多 3 个字符（按 code point 计数，一个表情算一个），独立存储、不并入备份。
+    // 截断放在输入层做，这里只管持久化——拼音输入法组词过程中不能硬截断
+    const updateNickname = async (name) => {
+        const clean = String(name || '');
+        setNickname(clean);
+        try { await AsyncStorage.setItem('nickname', clean); } catch (e) { addLogEntry('Error', '保存昵称失败: ' + e.message); }
+    };
+
     const clearAllData = async () => {
         setInventory([]); setHabits([]); setCalendarData({});
+        setNickname('');
         setCustomOptions({
             categories: ['食品', '日用品', '洗护', '其他'],
             itemUnits: ['盒', '瓶', '袋', '个', '件', '把'],
@@ -617,9 +630,9 @@ export const AppProvider = ({ children }) => {
 
     return (
         <AppContext.Provider value={{
-            inventory, habits, calendarData, customOptions, themeBg, themeColors, toastMsg, toastVisible, debugLogs, showToast,
+            inventory, habits, calendarData, customOptions, themeBg, nickname, themeColors, toastMsg, toastVisible, debugLogs, showToast,
             addItem, editItem, deleteItem, updateStock, updateStockBatch, addHabit, editHabit, deleteHabit,
-            addHabitRecord, addMedicineCheckInRecord, addItemCheckInRecord, removeLog, addCustomOption, clearAllData, exportData, importData, getItemStatus, updateTheme,
+            addHabitRecord, addMedicineCheckInRecord, addItemCheckInRecord, removeLog, addCustomOption, clearAllData, exportData, importData, getItemStatus, updateTheme, updateNickname,
             addLogEntry, exportLogs, deleteRecordWithStockRestore, updateCustomOptionList
         }}>
             {children}

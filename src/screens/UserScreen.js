@@ -4,6 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS, THEME_COLORS } from '../theme';
+import { searchColorNames, contrastText } from '../colorNames';
 import { checkUpdate, downloadAndInstallApk, UPDATE_CONFIG } from '../updater';
 
 // 行高（初次测量前的默认值）
@@ -52,7 +53,7 @@ const PrefRow = ({
                         onChangeText={setRenameText}
                         autoFocus
                     />
-                    <TouchableOpacity style={styles.prefConfirmBtn} onPress={confirmRename}>
+                    <TouchableOpacity style={[styles.prefConfirmBtn, { backgroundColor: tc.accent }]} onPress={confirmRename}>
                         <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>✓</Text>
                     </TouchableOpacity>
                 </View>
@@ -79,10 +80,20 @@ const PrefRow = ({
 };
 
 export default function UserScreen() {
-    const { exportData, importData, clearAllData, themeBg, themeColors: tc, updateTheme, exportLogs, debugLogs, customOptions, updateCustomOptionList } = useContext(AppContext);
+    const { exportData, importData, clearAllData, themeBg, themeColors: tc, updateTheme, exportLogs, debugLogs, customOptions, updateCustomOptionList, nickname, updateNickname } = useContext(AppContext);
     const [settingsVisible, setSettingsVisible] = useState(false);
+    // 昵称最多 6 个字符：末尾是英文字母说明拼音还没上屏，此时不截断，否则输入法组词会被打断
+    const handleNickChange = (t) => {
+        const chars = Array.from(t || '');
+        const last = chars[chars.length - 1] || '';
+        if (chars.length > 6 && !/[a-zA-Z]/.test(last)) updateNickname(chars.slice(0, 6).join(''));
+        else updateNickname(t);
+    };
+    const normalizeNick = () => updateNickname(Array.from(nickname || '').slice(0, 6).join(''));
     const [customColor, setCustomColor] = useState('#f7f6f1');
-    const [colorPreview, setColorPreview] = useState('#f7f6f1');
+    const [colorPreview, setColorPreview] = useState('');
+    // 颜色名检索结果（输入「雾霾蓝」这类名称时展示候选色块）
+    const [colorMatches, setColorMatches] = useState([]);
     // 主题色选择改为“预览 + 保存”：pendingBg 为弹窗内临时选中色，点“保存”才生效
     const [pendingBg, setPendingBg] = useState('#f7f6f1');
 
@@ -123,6 +134,24 @@ export default function UserScreen() {
     useEffect(() => { editListRef.current = editList; }, [editList]);
     // 每次打开设置弹窗时，将临时选中色重置为当前已保存主题色
     useEffect(() => { if (settingsVisible) setPendingBg(themeBg); }, [settingsVisible]);
+
+    // 自定义颜色输入：合法 hex 直接预览；否则按颜色名检索候选色块
+    const handleColorInput = (t) => {
+        setCustomColor(t);
+        if (/^#[0-9A-Fa-f]{6}$/.test(t.trim())) {
+            setColorPreview(t.trim());
+            setPendingBg(t.trim());
+            setColorMatches([]);
+        } else {
+            setColorMatches(searchColorNames(t));
+        }
+    };
+    const applyColorName = (value) => {
+        setCustomColor(value);
+        setColorPreview(value);
+        setPendingBg(value);
+        setColorMatches([]);
+    };
 
     // 偏好设置弹窗：右滑关闭（水平手势优先，不影响内部 ScrollView 垂直滚动）
     const settingsPan = useRef(PanResponder.create({
@@ -402,6 +431,26 @@ export default function UserScreen() {
         <View style={[styles.container, { backgroundColor: tc.bg }]}>
             <Text style={[styles.headerTitle, { color: tc.textMain }]}>我的</Text>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 100 }}>
+                {/* 昵称：最多 6 个字符，表情也算一个，实时写盘，首页立刻跟着变 */}
+                <View style={[styles.card, { backgroundColor: tc.cardBg }]}>
+                    <View style={styles.iconContainer}><Text style={{ fontSize: 20 }}>👤</Text></View>
+                    <View style={styles.cardTextContainer}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.cardTitle, { color: tc.textMain }]}>昵称</Text>
+                            <Text style={{ fontSize: 12, color: tc.textSub, marginLeft: 8 }}>{Array.from(nickname || '').length}/6</Text>
+                        </View>
+                        <TextInput
+                            style={[styles.nickInput, { color: tc.textMain }]}
+                            value={nickname}
+                            onChangeText={handleNickChange}
+                            onEndEditing={normalizeNick}
+                            onBlur={normalizeNick}
+                            placeholder="最多 6 个字，可用表情"
+                            placeholderTextColor={tc.textLight}
+                            numberOfLines={1}
+                        />
+                    </View>
+                </View>
                 {renderCard('📤', '数据备份导出', '保存到本地文件夹，或分享给其他应用', () => setExportChoiceVisible(true))}
                 {renderCard('📥', '数据恢复导入', '从本地文件恢复数据', importData)}
                 {renderCard('📄', '导出调试日志', '导出用于排查问题的日志文件', exportLogs)}
@@ -435,7 +484,7 @@ export default function UserScreen() {
                                     </>
                                 ) : null}
                                 {updateMsg ? <Text style={{ color: COLORS.orange, fontSize: 12, marginTop: 6 }}>{updateMsg}</Text> : null}
-                                <TouchableOpacity disabled={updateDownloading} style={[styles.saveBtn, { backgroundColor: COLORS.primaryGreen, marginTop: 14, opacity: updateDownloading ? 0.6 : 1 }]} onPress={handleUpdateAction}>
+                                <TouchableOpacity disabled={updateDownloading} style={[styles.saveBtn, { backgroundColor: tc.accent, marginTop: 14, opacity: updateDownloading ? 0.6 : 1 }]} onPress={handleUpdateAction}>
                                     <Text style={{ color: '#fff', fontWeight: '600' }}>{Platform.OS === 'ios' ? (UPDATE_CONFIG.iosAppStoreUrl || UPDATE_CONFIG.iosTestFlightUrl ? '前往商店更新' : 'iOS 暂不支持应用内安装') : '下载并安装'}</Text>
                                 </TouchableOpacity>
                             </>
@@ -466,17 +515,25 @@ export default function UserScreen() {
                             })}
                         </View>
                         <Text style={[styles.settingLabel, { color: tc.textSub, fontSize: 12, fontWeight: '500', marginLeft: 18, marginTop: 2, marginBottom: 8 }]}>自定义颜色（作为选择背景色的子选项）</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20, marginLeft: 18 }}>
-                            <View style={[styles.colorCircle, { width: 50, height: 50, backgroundColor: colorPreview, borderColor: tc.border }]}>
-                                {pendingBg === colorPreview && <Text style={styles.checkMark}>✓</Text>}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: colorMatches.length > 0 ? 8 : 20, marginLeft: 18 }}>
+                            <View style={[styles.colorCircle, { width: 38, height: 38, borderRadius: 19, backgroundColor: colorPreview || 'transparent', borderColor: colorPreview ? tc.border : tc.textLight, borderStyle: colorPreview ? 'solid' : 'dashed' }]}>
+                                {colorPreview
+                                    ? (pendingBg === colorPreview && <Text style={[styles.checkMark, { fontSize: 16, color: contrastText(colorPreview) }]}>✓</Text>)
+                                    : <Text style={{ color: tc.textLight, fontSize: 9 }}>未选</Text>}
                             </View>
-                            <TextInput style={[styles.input, { flex: 1, backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]} value={customColor} onChangeText={(t) => { setCustomColor(t); setColorPreview(t); }} placeholder="#f7f6f1" placeholderTextColor={tc.textLight} />
-                            <TouchableOpacity style={[styles.colorCircle, { backgroundColor: customColor, width: 40, height: 40 }]} onPress={() => { if (customColor.match(/^#[0-9A-Fa-f]{6}$/)) { setPendingBg(customColor); setColorPreview(customColor); } }} >
-                                <Text style={{ color: '#fff', fontWeight: 'bold' }}>✓</Text>
-                            </TouchableOpacity>
+                            <TextInput style={[styles.input, { flex: 1, backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, fontSize: 13, paddingVertical: 8 }]} value={customColor} onChangeText={handleColorInput} placeholder="色值或颜色名，如 雾霾蓝" numberOfLines={1} placeholderTextColor={tc.textLight} />
                         </View>
-                        <TouchableOpacity style={styles.saveThemeBtn} onPress={() => { if (pendingBg && pendingBg !== themeBg) updateTheme(pendingBg); setSettingsVisible(false); }}>
-                            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>保存</Text>
+                        {colorMatches.length > 0 && (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginLeft: 18, marginBottom: 16 }}>
+                                {colorMatches.map(c => (
+                                    <TouchableOpacity key={c.value} style={[styles.colorNameChip, { backgroundColor: c.value, borderColor: tc.border }, pendingBg === c.value && { borderWidth: 2, borderColor: tc.accent }]} onPress={() => applyColorName(c.value)}>
+                                        <Text style={{ fontSize: 11, fontWeight: '600', color: contrastText(c.value) }}>{c.name}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
+                        <TouchableOpacity style={[styles.saveThemeBtn, { backgroundColor: tc.accent }]} onPress={() => { if (pendingBg && pendingBg !== themeBg) updateTheme(pendingBg); setSettingsVisible(false); }}>
+                            <Text style={{ color: tc.accentText, fontWeight: '600', fontSize: 16 }}>保存</Text>
                         </TouchableOpacity>
 
                         <Text style={[styles.settingLabel, { color: tc.textMain }]}>偏好标签管理</Text>
@@ -548,12 +605,12 @@ export default function UserScreen() {
                                 value={newItemText}
                                 onChangeText={setNewItemText}
                             />
-                            <TouchableOpacity style={[styles.prefBtn, { flex: 1 }]} onPress={addPrefItem}>
-                                <Text style={{ color: '#fff', fontWeight: '600' }}>新增</Text>
+                            <TouchableOpacity style={[styles.prefBtn, { flex: 1, backgroundColor: tc.accent }]} onPress={addPrefItem}>
+                                <Text style={{ color: tc.accentText, fontWeight: '600' }}>新增</Text>
                             </TouchableOpacity>
                         </View>
-                        <TouchableOpacity style={[styles.saveBtn, { marginTop: 15 }]} onPress={() => { endDrag(); savePrefList(); setPrefsVisible(false); }}>
-                            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>保存设置</Text>
+                        <TouchableOpacity style={[styles.saveBtn, { marginTop: 15, backgroundColor: tc.accent }]} onPress={() => { endDrag(); savePrefList(); setPrefsVisible(false); }}>
+                            <Text style={{ color: tc.accentText, fontWeight: '600', fontSize: 16 }}>保存设置</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -565,13 +622,13 @@ export default function UserScreen() {
                     <View style={[styles.dialogContent, { backgroundColor: tc.modalBg }]}>
                         <Text style={[styles.modalTitle, { color: tc.textMain, textAlign: 'center' }]}>退出标签编辑</Text>
                         <Text style={{ fontSize: 14, color: tc.textSub, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>未保存的调整会丢失，请选择退出方式</Text>
-                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => { setPrefsExitVisible(false); setPrefsVisible(false); }}>
+                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.cardSubBg, marginBottom: 10 }]} onPress={() => { setPrefsExitVisible(false); setPrefsVisible(false); }}>
                             <Text style={{ color: tc.textMain, fontWeight: '600' }}>仅退出</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={() => { endDrag(); savePrefList(); setPrefsExitVisible(false); setPrefsVisible(false); }}>
-                            <Text style={{ color: '#fff', fontWeight: '600' }}>保存并退出</Text>
+                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.accent }]} onPress={() => { endDrag(); savePrefList(); setPrefsExitVisible(false); setPrefsVisible(false); }}>
+                            <Text style={{ color: tc.accentText, fontWeight: '600' }}>保存并退出</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => setPrefsExitVisible(false)}><Text style={{ color: tc.textSub, textAlign: 'center', marginTop: 12 }}>取消</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => setPrefsExitVisible(false)}><Text style={{ color: tc.labelText, textAlign: 'center', marginTop: 12 }}>取消</Text></TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -584,7 +641,7 @@ export default function UserScreen() {
                         <Text style={{ fontSize: 14, color: tc.textSub, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>确定要删除“{delPrefIndex !== null ? editList[delPrefIndex] : ''}”吗？</Text>
                         <View style={{ flexDirection: 'row', gap: 10 }}>
                             <TouchableOpacity style={[styles.dialogBtn, { flex: 1, backgroundColor: tc.cardSubBg }]} onPress={() => setDelPrefVisible(false)}>
-                                <Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text>
+                                <Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.dialogBtn, { flex: 1, backgroundColor: COLORS.pink }]} onPress={() => { if (delPrefIndex !== null) { const newList = [...editList]; newList.splice(delPrefIndex, 1); setEditList(newList); } setDelPrefVisible(false); }}>
                                 <Text style={{ color: '#fff', fontWeight: '600' }}>删除</Text>
@@ -600,14 +657,14 @@ export default function UserScreen() {
                     <View style={[styles.dialogContent, { backgroundColor: tc.modalBg }]}>
                         <Text style={[styles.modalTitle, { color: tc.textMain, textAlign: 'center' }]}>导出数据备份</Text>
                         <Text style={{ fontSize: 14, color: tc.textSub, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>保存到手机文件夹，或通过其他应用分享</Text>
-                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={() => { setExportChoiceVisible(false); exportData('save'); }}>
-                            <Text style={{ color: '#fff', fontWeight: '600' }}>保存到本地</Text>
+                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.accent }]} onPress={() => { setExportChoiceVisible(false); exportData('save'); }}>
+                            <Text style={{ color: tc.accentText, fontWeight: '600' }}>保存到本地</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.cardSubBg, marginTop: 10 }]} onPress={() => { setExportChoiceVisible(false); exportData('share'); }}>
                             <Text style={{ color: tc.textMain, fontWeight: '600' }}>分享导出</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.cardSubBg, marginTop: 10 }]} onPress={() => setExportChoiceVisible(false)}>
-                            <Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text>
+                            <Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -619,8 +676,8 @@ export default function UserScreen() {
                     <View style={[styles.dialogContent, { backgroundColor: tc.modalBg }]}>
                         <Text style={[styles.modalTitle, { color: tc.textMain, textAlign: 'center' }]}>提示</Text>
                         <Text style={{ fontSize: 14, color: tc.textSub, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>{tipMsg}</Text>
-                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={() => setTipVisible(false)}>
-                            <Text style={{ color: '#fff', fontWeight: '600' }}>确定</Text>
+                        <TouchableOpacity style={[styles.dialogBtn, { backgroundColor: tc.accent }]} onPress={() => setTipVisible(false)}>
+                            <Text style={{ color: tc.accentText, fontWeight: '600' }}>确定</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -634,7 +691,7 @@ export default function UserScreen() {
                         <Text style={{ fontSize: 14, color: tc.textSub, marginTop: 8, marginBottom: 20, textAlign: 'center' }}>将删除所有物品、记录与设置，且无法恢复。确定继续吗？</Text>
                         <View style={{ flexDirection: 'row', gap: 10 }}>
                             <TouchableOpacity style={[styles.dialogBtn, { flex: 1, backgroundColor: tc.cardSubBg }]} onPress={() => setClearConfirmVisible(false)}>
-                                <Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text>
+                                <Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.dialogBtn, { flex: 1, backgroundColor: COLORS.pink }]} onPress={() => { clearAllData(); setClearConfirmVisible(false); setSettingsVisible(false); }}>
                                 <Text style={{ color: '#fff', fontWeight: '600' }}>确认清除</Text>
@@ -650,6 +707,7 @@ export default function UserScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, paddingTop: 60 },
     headerTitle: { fontSize: 24, fontWeight: '600', color: COLORS.textMain, paddingHorizontal: SIZES.padding, marginBottom: 20 },
+    nickInput: { fontSize: 14, color: COLORS.textSub, padding: 0, paddingTop: 3 },
     card: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardBg, marginHorizontal: SIZES.padding, padding: 16, borderRadius: SIZES.radius, marginBottom: 16, ...SHADOWS.card },
     iconContainer: { width: 36, height: 36, borderRadius: 10, backgroundColor: COLORS.lightGreen, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     cardTextContainer: { flex: 1 },
@@ -664,6 +722,7 @@ const styles = StyleSheet.create({
     colorPalette: { flexDirection: 'row', flexWrap: 'wrap', gap: 15, marginBottom: 20 },
     colorCircle: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#e0e0e0', justifyContent: 'center', alignItems: 'center' },
     colorCircleActive: { borderColor: COLORS.primaryGreen },
+    colorNameChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, borderWidth: 1 },
     checkMark: { color: COLORS.primaryGreen, fontWeight: 'bold' },
     settingItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
     settingText: { fontSize: 15, color: COLORS.textMain },

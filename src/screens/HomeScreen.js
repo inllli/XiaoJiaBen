@@ -13,9 +13,8 @@ function CoverCarousel({ covers, onError, bg }) {
     const slideAnim = useRef(new Animated.Value(0)).current;
     const isUri = (c) => typeof c === 'string' && (c.startsWith('file') || c.startsWith('content') || c.startsWith('http') || c.startsWith('data:image'));
     const all = (covers && covers.length > 0) ? covers : [];
-    // 同时存在真实图片和 emoji 兜底时只轮播真实图片，避免「图片↔纸箱」来回切
-    const hasImage = all.some(c => isUri(c));
-    const base = hasImage ? all.filter(c => isUri(c)) : all;
+    // 模板 emoji 与上传的封面可以共存，一起参与轮播
+    const base = all;
     const valid = base.filter(c => !failedUris.includes(c));
     const n = valid.length;
     // 数据变化（编辑保存后 covers 变了）时重置失败记录，重新尝试加载
@@ -73,7 +72,7 @@ function parseQtyText(s) {
 }
 
 export default function HomeScreen({ navigation }) {
-    const { inventory, calendarData, updateStock, updateStockBatch, deleteItem, getItemStatus, themeBg, themeColors: tc, addLogEntry, customOptions } = useContext(AppContext);
+    const { inventory, calendarData, updateStock, updateStockBatch, deleteItem, getItemStatus, themeBg, themeColors: tc, addLogEntry, customOptions, nickname } = useContext(AppContext);
     const [category, setCategory] = useState('全部');
     const [showAllCats, setShowAllCats] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
@@ -85,10 +84,38 @@ export default function HomeScreen({ navigation }) {
     const [quickConsumeItem, setQuickConsumeItem] = useState(null);
     const [quickConsumeQty, setQuickConsumeQty] = useState(1);
     const [searchText, setSearchText] = useState('');
+    // 筛选区收起/展开：三行筛选放进列表头部，随手指滚动整体推上去/拉下来，天然平滑；
+    // 按钮的行为取决于“筛选栏此刻看不看得见”：
+    //   看得见（在顶部且没手动收起）→ 点一下收起；
+    //   看不见（已随列表滚走，或已手动收起）→ 点一下展开并平滑滚回顶部，一次点击就能看到三行
+    const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+    const [filtersOnTop, setFiltersOnTop] = useState(true);
+    const filtersCollapsedRef = useRef(false);
+    const filtersOnTopRef = useRef(true);
+    const lastScrollYRef = useRef(0);
+    const listRef = useRef(null);
+    const expandFilters = () => {
+        filtersCollapsedRef.current = false;
+        setFiltersCollapsed(false);
+        if (listRef.current) listRef.current.scrollToOffset({ offset: 0, animated: true });
+    };
+    const toggleFilters = () => {
+        if (filtersCollapsedRef.current || !filtersOnTopRef.current) expandFilters();
+        else { filtersCollapsedRef.current = true; setFiltersCollapsed(true); }
+    };
+    const onListScroll = (e) => {
+        const y = e.nativeEvent.contentOffset.y;
+        lastScrollYRef.current = y;
+        const onTop = y <= 12;
+        if (onTop !== filtersOnTopRef.current) { filtersOnTopRef.current = onTop; setFiltersOnTop(onTop); }
+        // 手动收起后往回拉到顶，自动恢复展开
+        if (y <= 2 && filtersCollapsedRef.current) expandFilters();
+    };
     const [catModalVisible, setCatModalVisible] = useState(false);
     const [quickStockVisible, setQuickStockVisible] = useState(false);
     const [quickStockText, setQuickStockText] = useState('');
     const [quickStockMsg, setQuickStockMsg] = useState('');
+    const [previewCover, setPreviewCover] = useState(null);
 
     const [statusFilter, setStatusFilter] = useState(null);
 
@@ -98,7 +125,14 @@ export default function HomeScreen({ navigation }) {
         if (searchText.trim()) {
             result = result.filter(i => i.name && i.name.toLowerCase().includes(searchText.toLowerCase()));
         }
-        return result;
+        // 排序：已过期 / 已用完沉底，其余按添加时间倒序（id 为创建时的毫秒时间戳）
+        const isBottom = (s) => (s === 'expired' || s === 'empty') ? 1 : 0;
+        return [...result].sort((a, b) => {
+            const ra = isBottom(getItemStatus(a));
+            const rb = isBottom(getItemStatus(b));
+            if (ra !== rb) return ra - rb;
+            return (Number(b.id) || 0) - (Number(a.id) || 0);
+        });
     }, [inventory, category, statusFilter, searchText]);
 
     // 修复：动态获取分类，去重并排序
@@ -252,8 +286,8 @@ export default function HomeScreen({ navigation }) {
                             <View style={[styles.statusDot, { backgroundColor: status === 'ok' ? COLORS.primaryGreen : (status === 'warn' ? COLORS.orange : (status === 'danger' ? COLORS.pink : (status === 'empty' ? '#9e9e9e' : '#c0392b'))) }]} />
                             <Text style={[styles.itemStock, { color: tc.textSub }]}>剩 {itemStock} {itemUnit}</Text>
                         </View>
-                        <TouchableOpacity style={styles.quickConsumeBtn} onPress={() => openQuickConsume(item)}>
-                            <Text style={styles.quickConsumeBtnText}>记一下</Text>
+                        <TouchableOpacity style={[styles.quickConsumeBtn, { backgroundColor: tc.accent }]} onPress={() => openQuickConsume(item)}>
+                            <Text style={[styles.quickConsumeBtnText, { color: tc.accentText }]}>记一下</Text>
                         </TouchableOpacity>
                     </View>
                     {item.purpose && <Text style={{ fontSize: 11, color: tc.textSub, marginTop: 2, marginBottom: 2 }}>{item.purpose}</Text>}
@@ -276,50 +310,80 @@ export default function HomeScreen({ navigation }) {
 
     return (
         <View style={[styles.container, { backgroundColor: tc.bg }]}>
-            <Text style={[styles.headerTitle, { color: tc.textMain }]}>下午好，家里有{inventory.length}件物品</Text>
+            <View style={styles.headerRow}>
+                <View style={{ flex: 1 }}>
+                    <Text style={[styles.headerTitle, { color: tc.textMain, marginBottom: 0 }]} numberOfLines={1}>下午好{nickname ? '，' + nickname : ''}</Text>
+                    <Text style={[styles.headerSub, { color: tc.textMain }]}>家里有 {inventory.length} 件物品</Text>
+                </View>
+                <TouchableOpacity style={[styles.filterToggle, { backgroundColor: tc.chipBg, borderColor: tc.border }]} onPress={toggleFilters}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 12, color: tc.textSub, includeFontPadding: false }}>筛选</Text>
+                        {/* 用 View 画三角取代 ⌃/⌄ 字符：字符本身基线偏移，跟文字对不齐 */}
+                        {(filtersCollapsed || !filtersOnTop) ? (
+                            <View style={{ width: 0, height: 0, borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 5, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: tc.textSub }} />
+                        ) : (
+                            <View style={{ width: 0, height: 0, borderLeftWidth: 4, borderRightWidth: 4, borderBottomWidth: 5, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: tc.textSub }} />
+                        )}
+                    </View>
+                </TouchableOpacity>
+            </View>
             {warnCount + dangerCount > 0 && (
                 <View style={[styles.alertBanner, { backgroundColor: tc.warnBg }]}><Text style={styles.alertText}>{'\u26A0\uFE0F'} 有 {warnCount + dangerCount} 件物品需要补货或临期</Text></View>
             )}
-            <View style={styles.categoryRow}>
-                {visibleCats.map(cat => (
-                    // 分类与“更多...”五个按钮同排：flex:1 自适应均分宽度
-                    <TouchableOpacity key={cat} onPress={() => setCategory(cat)} style={[styles.catChip, { flex: 1, paddingHorizontal: 8, alignItems: 'center', backgroundColor: tc.chipBg, borderColor: tc.border }, category === cat && styles.catChipActive]}>
-                        <Text numberOfLines={1} style={[styles.catText, { color: tc.textSub }, category === cat && styles.catTextActive]}>{cat}</Text>
-                    </TouchableOpacity>
-                ))}
-                {categoryList.length > 4 && (
-                    <TouchableOpacity style={[styles.catChip, { flex: 1, paddingHorizontal: 8, alignItems: 'center', backgroundColor: tc.chipBg, borderColor: tc.border }]} onPress={() => setCatModalVisible(true)}>
-                        <Text numberOfLines={1} style={[styles.catText, { color: tc.textSub }]}>更多...</Text>
-                    </TouchableOpacity>
+            <FlatList
+                ref={listRef}
+                data={filteredInventory}
+                renderItem={renderItem}
+                keyExtractor={item => item.id}
+                numColumns={2}
+                columnWrapperStyle={styles.row}
+                contentContainerStyle={{ paddingBottom: 100 }}
+                onScroll={onListScroll}
+                scrollEventThrottle={16}
+                ListHeaderComponent={filtersCollapsed ? null : (
+                    <View>
+                        <View style={styles.categoryRow}>
+                            {visibleCats.map(cat => (
+                                <TouchableOpacity key={cat} onPress={() => setCategory(cat)} style={[styles.catChip, { flex: 1, paddingHorizontal: 8, alignItems: 'center', backgroundColor: tc.chipBg, borderColor: tc.border }, category === cat && { backgroundColor: tc.accent, borderColor: tc.accent }]}>
+                                    <Text numberOfLines={1} style={[styles.catText, { color: tc.textSub }, category === cat && { color: tc.accentText, fontWeight: '600' }]}>{cat}</Text>
+                                </TouchableOpacity>
+                            ))}
+                            {categoryList.length > 4 && (
+                                <TouchableOpacity style={[styles.catChip, { flex: 1, paddingHorizontal: 8, alignItems: 'center', backgroundColor: tc.chipBg, borderColor: tc.border }]} onPress={() => setCatModalVisible(true)}>
+                                    <Text numberOfLines={1} style={[styles.catText, { color: tc.textSub }]}>更多...</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                        <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} style={styles.statusRow} contentContainerStyle={styles.statusRowContent}>
+                            {[['expired', '已过期'], ['danger', '临期'], ['empty', '已用完'], ['warn', '快用完了']].map(([key, label]) => (
+                                <TouchableOpacity
+                                    key={key}
+                                    onPress={() => setStatusFilter(statusFilter === key ? null : key)}
+                                    style={[styles.statusChip, { backgroundColor: statusFilter === key ? tc.accent : tc.chipBg, borderColor: statusFilter === key ? tc.accent : tc.border }]}
+                                >
+                                    <Text numberOfLines={1} style={[styles.statusChipText, { color: statusFilter === key ? tc.accentText : tc.textSub }]}>{label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                        <View style={styles.searchRow}>
+                            <TextInput
+                                style={[styles.searchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]}
+                                placeholder="搜索名称..."
+                                placeholderTextColor={tc.textLight}
+                                value={searchText}
+                                onChangeText={setSearchText}
+                            />
+                        </View>
+                        {category !== '全部' && !visibleCats.includes(category) && (
+                            <View style={[styles.filterBanner, { backgroundColor: tc.okBg }]}>
+                                <Text style={styles.filterBannerText}>{'当前筛选：' + category}</Text>
+                                <TouchableOpacity onPress={() => setCategory('全部')}><Text style={styles.clearFilterText}>清除</Text></TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
                 )}
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} style={styles.statusRow} contentContainerStyle={styles.statusRowContent}>
-                {[['expired', '已过期'], ['danger', '临期'], ['empty', '已用完'], ['warn', '快用完了']].map(([key, label]) => (
-                    <TouchableOpacity
-                        key={key}
-                        onPress={() => setStatusFilter(statusFilter === key ? null : key)}
-                        style={[styles.statusChip, { backgroundColor: statusFilter === key ? COLORS.primaryGreen : tc.chipBg, borderColor: statusFilter === key ? COLORS.primaryGreen : tc.border }]}
-                    >
-                        <Text numberOfLines={1} style={[styles.statusChipText, { color: statusFilter === key ? '#fff' : tc.textSub }]}>{label}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-            <View style={styles.searchRow}>
-                <TextInput
-                    style={[styles.searchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]}
-                    placeholder="搜索名称..."
-                    placeholderTextColor={tc.textLight}
-                    value={searchText}
-                    onChangeText={setSearchText}
-                />
-            </View>
-            {category !== '全部' && !visibleCats.includes(category) && (
-                <View style={[styles.filterBanner, { backgroundColor: tc.okBg }]}>
-                    <Text style={styles.filterBannerText}>{'当前筛选：' + category}</Text>
-                    <TouchableOpacity onPress={() => setCategory('全部')}><Text style={styles.clearFilterText}>清除</Text></TouchableOpacity>
-                </View>
-            )}
-            {filteredInventory.length === 0 ? <View style={styles.emptyView}><Text style={[styles.emptyText, { color: tc.textSub }]}>{(category !== '全部' || statusFilter || searchText.trim()) ? '没有符合筛选条件的物品' : '暂无物品，点击底部 + 添加'}</Text></View> : <FlatList data={filteredInventory} renderItem={renderItem} keyExtractor={item => item.id} numColumns={2} columnWrapperStyle={styles.row} contentContainerStyle={{ paddingBottom: 100 }} />}
+                ListEmptyComponent={<View style={styles.emptyView}><Text style={[styles.emptyText, { color: tc.textSub }]}>{(category !== '全部' || statusFilter || searchText.trim()) ? '没有符合筛选条件的物品' : '暂无物品，点击底部 + 添加'}</Text></View>}
+            />
 
             <Modal visible={detailVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setDetailVisible(false)}>
                 <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDetailVisible(false)}>
@@ -328,6 +392,22 @@ export default function HomeScreen({ navigation }) {
                             <View><Text style={[styles.modalTitle, { color: tc.textMain }]}>{selectedItem?.name}</Text><Text style={[styles.modalSub, { color: tc.textSub }]}>{(() => { const cat = (selectedItem?.category || '').replace('未指定', '').trim(); const loc = ((selectedItem?.locations || selectedItem?.location || '')).replace('未指定', '').trim(); return cat + (loc ? ` · ${loc}` : ''); })()}</Text></View>
                             <TouchableOpacity onPress={() => setDetailVisible(false)}><Text style={{ fontSize: 20, color: tc.textSub }}>✕</Text></TouchableOpacity>
                         </View>
+                        {(() => {
+                            const covers = ((selectedItem?.covers && selectedItem.covers.length > 0) ? selectedItem.covers : [selectedItem?.cover || '📦']).filter(Boolean);
+                            if (covers.length === 0) return null;
+                            const isUri = (c) => typeof c === 'string' && (c.startsWith('file') || c.startsWith('content') || c.startsWith('http') || c.startsWith('data:image'));
+                            return (
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginBottom: 12 }}>
+                                    {covers.map((c, i) => (
+                                        <TouchableOpacity key={i} activeOpacity={0.85} onPress={() => setPreviewCover(c)}>
+                                            {isUri(c)
+                                                ? <Image source={{ uri: c }} style={[styles.detailCover, { borderColor: tc.border, backgroundColor: tc.cardSubBg }]} resizeMode="cover" />
+                                                : <View style={[styles.detailCover, { borderColor: tc.border, backgroundColor: tc.cardSubBg, justifyContent: 'center', alignItems: 'center' }]}><Text style={{ fontSize: 30 }}>{c}</Text></View>}
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            );
+                        })()}
                         <View style={[styles.stockControl, { backgroundColor: tc.cardSubBg }]}>
                             <Text style={[styles.stockText, { color: tc.textMain }]}>剩 {(tempStock || 0).toFixed(1)} {selectedItem?.unit}</Text>
                             <View style={styles.stockInputWrap}>
@@ -366,6 +446,13 @@ export default function HomeScreen({ navigation }) {
                     </View>
                 </TouchableOpacity>
             </Modal>
+            <Modal visible={!!previewCover} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setPreviewCover(null)}>
+                <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewCover(null)}>
+                    {previewCover && /^(file|content|http|data:image)/.test(previewCover)
+                        ? <Image source={{ uri: previewCover }} style={styles.previewImage} resizeMode="contain" />
+                        : <Text style={{ fontSize: 120 }}>{previewCover}</Text>}
+                </TouchableOpacity>
+            </Modal>
             <Modal visible={quickConsumeVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setQuickConsumeVisible(false)}>
                 <TouchableOpacity style={styles.centerOverlay} activeOpacity={1} onPress={() => setQuickConsumeVisible(false)}>
                     <View style={[styles.quickConsumeModal, { backgroundColor: tc.modalBg }]} onStartShouldSetResponder={() => true}>
@@ -390,8 +477,8 @@ export default function HomeScreen({ navigation }) {
                             </View>
                         </View>
                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => setQuickConsumeVisible(false)}><Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text></TouchableOpacity>
-                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={handleQuickConsumeConfirm}><Text style={{ color: '#fff', fontWeight: '600' }}>确认消耗</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => setQuickConsumeVisible(false)}><Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.accent }]} onPress={handleQuickConsumeConfirm}><Text style={{ color: tc.accentText, fontWeight: '600' }}>确认消耗</Text></TouchableOpacity>
                         </View>
                     </View>
                 </TouchableOpacity>
@@ -411,7 +498,7 @@ export default function HomeScreen({ navigation }) {
                     </View>
                 </TouchableOpacity>
             </Modal>
-            <Animated.View style={[styles.quickStockBall, { backgroundColor: '#b2c5b0' }, { transform: [{ translateX: ballPos.x }, { translateY: ballPos.y }] }]} {...ballPan.panHandlers}>
+            <Animated.View style={[styles.quickStockBall, { backgroundColor: tc.accent }, { transform: [{ translateX: ballPos.x }, { translateY: ballPos.y }] }]} {...ballPan.panHandlers}>
                 <Text style={{ fontSize: 15, color: '#fff' }}>{'\uD83D\uDCAC'}</Text>
             </Animated.View>
             <Modal visible={quickStockVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={closeQuickStock}>
@@ -445,9 +532,9 @@ export default function HomeScreen({ navigation }) {
                         ) : null}
                         {quickStockMsg ? <Text style={{ color: COLORS.orange, fontSize: 12, marginTop: 8 }}>{quickStockMsg}</Text> : null}
                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={closeQuickStock}><Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={closeQuickStock}><Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text></TouchableOpacity>
                             {!quickPending && (
-                                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: COLORS.primaryGreen }]} onPress={handleQuickStockConfirm}><Text style={{ color: '#fff', fontWeight: '600' }}>记录</Text></TouchableOpacity>
+                                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.accent }]} onPress={handleQuickStockConfirm}><Text style={{ color: tc.accentText, fontWeight: '600' }}>记录</Text></TouchableOpacity>
                             )}
                         </View>
                     </View>
@@ -460,6 +547,9 @@ export default function HomeScreen({ navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, paddingTop: 60 },
+    headerRow: { flexDirection: 'row', alignItems: 'flex-start', paddingRight: SIZES.padding, marginBottom: 12 },
+    headerSub: { fontSize: 24, fontWeight: '600', color: COLORS.textMain, paddingHorizontal: SIZES.padding, marginTop: 2 },
+    filterToggle: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
     headerTitle: { fontSize: 24, fontWeight: '600', color: COLORS.textMain, paddingHorizontal: SIZES.padding, marginBottom: 15 },
     alertBanner: { backgroundColor: COLORS.lightOrange, marginHorizontal: SIZES.padding, padding: 12, borderRadius: 12, marginBottom: 15 },
     alertText: { color: COLORS.orange, fontSize: 13, fontWeight: '600' },
@@ -536,4 +626,7 @@ const styles = StyleSheet.create({
     quickStockHint: { fontSize: 12, marginTop: 6, marginBottom: 8 },
     quickPickRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
     quickStockInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 52 },
+    detailCover: { width: 60, height: 60, borderRadius: 12, borderWidth: 1 },
+    previewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center' },
+    previewImage: { width: '100%', height: '80%' },
 });

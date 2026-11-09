@@ -102,41 +102,57 @@ function mixColor(hex, target, ratio) {
 // 默认暖白与中性灰主题：卡片用浅灰/白卡、填充用纯白；其余主题卡片跟随背景色系
 const PLAIN_THEME_BGS = ['#f7f6f1', '#f0f0f0', '#efede8', '#dcdcdc', '#c8c8c8'];
 const DEFAULT_THEME_BG = '#f7f6f1';
+// 调色盘预设色：这 15 套配色的派生结果不允许变动
+const PRESET_THEME_BGS = THEME_COLORS.map(c => String(c.value).toLowerCase());
 
 // 依据背景色明暗派生整套页面配色（字体/卡片/输入框/弹窗/组件），浅色主题沿用现有 COLORS
 export function getThemeColors(bg) {
-    const dark = isDarkColor(bg);
-    const lowerBg = String(bg).toLowerCase();
+    const rawBg = String(bg || DEFAULT_THEME_BG);
+    const dark = isDarkColor(rawBg);
+    const lowerBg = rawBg.toLowerCase();
     const isPlain = PLAIN_THEME_BGS.includes(lowerBg);
     const isDefault = lowerBg === DEFAULT_THEME_BG;
+    // 自定义深色：背景就是所选色，配套色全部按它的色相派生（不用固定的深灰/近黑），
+    // 避免红底配黑框的割裂感；预设深色仍走原来的固定深色模板
+    const customDark = dark && !PRESET_THEME_BGS.includes(lowerBg);
     return {
         isDark: dark,
-        bg,
+        bg: rawBg,
         // 文字
-        textMain: dark ? '#e8eaed' : COLORS.textMain,
-        textSub: dark ? '#9aa0a6' : COLORS.textSub,
-        textLight: dark ? '#6b7076' : COLORS.textLight,
+        textMain: dark ? (customDark ? '#f7f5f4' : '#e8eaed') : COLORS.textMain,
+        textSub: dark ? (customDark ? mixColor(rawBg, '#ffffff', 0.62) : '#9aa0a6') : COLORS.textSub,
+        textLight: dark ? (customDark ? mixColor(rawBg, '#ffffff', 0.40) : '#6b7076') : COLORS.textLight,
         // 卡片与面板：默认暖白 = 纯白卡（首页另用 homeCardBg 米白一档）；灰色 = 浅灰卡；
-        // 彩色浅色 = 背景同色系浅两档；深色 = 背景同色系浅一档
-        cardBg: dark ? mixColor(bg, '#ffffff', 0.12) : (isDefault ? '#ffffff' : (isPlain ? '#f0f0f0' : mixColor(bg, '#ffffff', 0.55))),
+        // 彩色浅色 = 背景同色系浅两档；深色 = 背景同色系浅一档（自定义深色更亮一档，保证卡片有层次）
+        cardBg: dark ? mixColor(rawBg, '#ffffff', customDark ? 0.18 : 0.12) : (isDefault ? '#ffffff' : (isPlain ? '#f0f0f0' : mixColor(rawBg, '#ffffff', 0.55))),
         // 首页卡片专用：默认暖白下比纯白深一点点（米白），不是浅灰；其余主题与 cardBg 一致
-        homeCardBg: dark ? mixColor(bg, '#ffffff', 0.12) : (isDefault ? mixColor(bg, '#ffffff', 0.35) : (isPlain ? '#f0f0f0' : mixColor(bg, '#ffffff', 0.55))),
-        cardSubBg: dark ? mixColor(bg, '#ffffff', 0.06) : (isPlain ? COLORS.bg : mixColor(bg, '#000000', 0.06)),
-        // 深色边框跟随背景色系提亮，不再用黑色系
-        border: dark ? mixColor(bg, '#ffffff', 0.22) : '#e8e8e8',
-        // 输入与弹窗
-        inputBg: dark ? '#2b2e33' : '#ffffff',
-        modalBg: dark ? mixColor(bg, '#ffffff', 0.18) : mixColor(bg, '#ffffff', 0.55),
+        homeCardBg: dark ? mixColor(rawBg, '#ffffff', customDark ? 0.18 : 0.12) : (isDefault ? mixColor(rawBg, '#ffffff', 0.35) : (isPlain ? '#f0f0f0' : mixColor(rawBg, '#ffffff', 0.55))),
+        cardSubBg: dark ? (customDark ? mixColor(rawBg, '#000000', 0.16) : mixColor(rawBg, '#ffffff', 0.06)) : (isPlain ? COLORS.bg : mixColor(rawBg, '#000000', 0.06)),
+        // 深色边框跟随背景色系提亮，不再用黑色系；浅色自定义（橙/黄等高饱和底）用背景压暗一档，
+        // 否则固定浅灰边压在橙底上等于没有边；预设浅色仍保持原来的 #e8e8e8
+        border: dark ? mixColor(rawBg, '#ffffff', customDark ? 0.30 : 0.22) : (PRESET_THEME_BGS.includes(lowerBg) ? '#e8e8e8' : mixColor(rawBg, '#000000', 0.18)),
+        // 输入与弹窗：自定义深色的输入框取背景暗一档的同色，而不是固定的近黑
+        inputBg: dark ? (customDark ? mixColor(rawBg, '#000000', 0.24) : '#2b2e33') : '#ffffff',
+        modalBg: dark ? mixColor(rawBg, '#ffffff', customDark ? 0.12 : 0.18) : mixColor(rawBg, '#ffffff', 0.55),
         overlay: dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.25)',
-        // 状态面板
-        warnBg: dark ? '#4a3a28' : COLORS.lightOrange,
-        dangerBg: dark ? '#4a2a2a' : COLORS.lightPink,
-        okBg: dark ? '#2c3a30' : COLORS.lightGreen,
+        // 状态面板：自定义深色下改取同色系偏黄/深红/偏绿，保证在饱和背景上仍可区分
+        warnBg: dark ? (customDark ? mixColor(rawBg, '#ffb74d', 0.60) : '#4a3a28') : COLORS.lightOrange,
+        dangerBg: dark ? (customDark ? mixColor(rawBg, '#000000', 0.30) : '#4a2a2a') : COLORS.lightPink,
+        okBg: dark ? (customDark ? mixColor(rawBg, '#7fd18e', 0.55) : '#2c3a30') : COLORS.lightGreen,
         // 已用完卡片：明显偏灰一档（区别于普通卡，也不能与页面背景同色）
-        emptyBg: dark ? '#25282c' : '#d4d3cf',
+        emptyBg: dark ? (customDark ? mixColor(rawBg, '#000000', 0.40) : '#25282c') : '#d4d3cf',
         // 封面图填充底（第三层）：默认/灰 = 纯白；彩色浅色 = 背景同色系浅三档（近白）；
         // 深色统一在卡片上叠7%白（比卡片再亮一档），随卡片色相走，与四状态色均不冲突
-        coverBg: dark ? 'rgba(255,255,255,0.07)' : (isPlain ? '#ffffff' : mixColor(bg, '#ffffff', 0.80)),
-        chipBg: dark ? '#3a3d43' : '#ffffff',
+        coverBg: dark ? 'rgba(255,255,255,0.07)' : (isPlain ? '#ffffff' : mixColor(rawBg, '#ffffff', 0.80)),
+        chipBg: dark ? (customDark ? mixColor(rawBg, '#ffffff', 0.14) : '#3a3d43') : '#ffffff',
+        // 强调色（选中态 chip / 主按钮）：自定义深色取比背景亮一档的同色；自定义浅色（橙/黄等）
+        // 取背景压暗一档的同色，配白字，避免固定主绿压在橙底上不配套；预设色仍返回原主绿
+        accent: customDark ? mixColor(rawBg, '#ffffff', 0.30) : (PRESET_THEME_BGS.includes(lowerBg) ? COLORS.primaryGreen : mixColor(rawBg, '#000000', 0.28)),
+        accentText: customDark ? mixColor(rawBg, '#000000', 0.62) : '#ffffff',
+        // 底部导航栏底色：自定义深色取背景暗一档的同色，避免深灰灰条割裂
+        navBg: dark ? (customDark ? mixColor(rawBg, '#000000', 0.22) : 'rgba(52, 55, 60, 0.96)') : 'rgba(255, 255, 255, 0.95)',
+        // 次级说明文字（记录详情、图例、弹窗取消按钮）：预设浅色沿用原灰字（观感不变），
+        // 深色与自定义色改用主文字色，否则灰字压在饱和底色上几乎看不清
+        labelText: (!dark && PRESET_THEME_BGS.includes(lowerBg)) ? COLORS.textSub : (dark ? (customDark ? '#f7f5f4' : '#e8eaed') : COLORS.textMain),
     };
 }

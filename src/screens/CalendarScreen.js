@@ -131,9 +131,9 @@ export default function CalendarScreen({ route }) {
                 <Calendar key={themeBg + '-' + selectedDate.slice(0, 7)} current={selectedDate} onDayPress={day => setSelectedDate(day.dateString)} markedDates={getMarkedDates()} markingType={'multi-dot'} monthFormat={'yyyy年MM月'}
                     theme={{ calendarBackground: tc.bg, textSectionTitleColor: tc.textSub, selectedDayBackgroundColor: COLORS.primaryGreen, selectedDayTextColor: '#ffffff', todayBackgroundColor: 'rgba(142,170,139,0.28)', todayTextColor: COLORS.primaryGreen, dayTextColor: tc.textMain, textDisabledColor: tc.textLight, dotColor: COLORS.primaryGreen, selectedDotColor: '#ffffff', arrowColor: COLORS.primaryGreen, monthTextColor: tc.textMain, textMonthFontWeight: 'bold', textDayFontSize: 14, textMonthFontSize: 16, weekVerticalMargin: 2 }} />
                 <View style={[styles.legend, { backgroundColor: tc.bg }]}>
-                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotInv }]} /><Text style={[styles.legendText, { color: tc.textSub }]}>库存</Text></View>
-                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotMed }]} /><Text style={[styles.legendText, { color: tc.textSub }]}>药品</Text></View>
-                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotHab }]} /><Text style={[styles.legendText, { color: tc.textSub }]}>习惯</Text></View>
+                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotInv }]} /><Text style={[styles.legendText, { color: tc.labelText, opacity: 0.85 }]}>库存</Text></View>
+                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotMed }]} /><Text style={[styles.legendText, { color: tc.labelText, opacity: 0.85 }]}>药品</Text></View>
+                    <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.dotHab }]} /><Text style={[styles.legendText, { color: tc.labelText, opacity: 0.85 }]}>习惯</Text></View>
                 </View>
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" style={[styles.timeline, { flex: 1, backgroundColor: tc.cardBg }]} contentContainerStyle={{ paddingBottom: 80 }}>
@@ -142,8 +142,8 @@ export default function CalendarScreen({ route }) {
                     <View key={record.id || index} style={styles.timelineItem}>
                         <View style={[styles.timelineDot, { backgroundColor: record.category === 'inventory' ? COLORS.dotInv : (record.category === 'medicine' ? COLORS.dotMed : COLORS.dotHab) }]} />
                         <View style={[styles.timelineContent, { backgroundColor: tc.cardSubBg }]}>
-                            <View style={styles.timelineRow}><Text style={[styles.timelineTime, { color: tc.textSub }]}>{record.time}</Text><Text style={[styles.timelineText, { color: tc.textMain }]}>{record.text}</Text></View>
-                            {record.sub ? <Text style={[styles.timelineSub, { color: tc.textSub }]}>{record.sub}</Text> : null}
+                            <View style={styles.timelineRow}><Text style={[styles.timelineTime, { color: tc.labelText, opacity: 0.8 }]}>{record.time}</Text><Text style={[styles.timelineText, { color: tc.textMain }]}>{record.text}</Text></View>
+                            {record.sub ? <Text style={[styles.timelineSub, { color: tc.labelText, opacity: 0.9 }]}>{record.sub}</Text> : null}
                         </View>
                         <TouchableOpacity style={[styles.deleteRecordBtn, { backgroundColor: tc.dangerBg }]} onPress={() => handleDeleteRecord(record)}><Text style={styles.deleteRecordText}>删除</Text></TouchableOpacity>
                     </View>
@@ -156,7 +156,7 @@ export default function CalendarScreen({ route }) {
                         <Text style={[styles.modalTitle, { color: tc.textMain }]}>删除记录</Text>
                         <Text style={{ fontSize: 14, color: tc.textSub, marginBottom: 20, textAlign: 'center' }}>确定要删除这条记录吗？</Text>
                         <View style={{ flexDirection: 'row', gap: 10 }}>
-                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => setDeleteConfirmVisible(false)}><Text style={{ color: tc.textSub, fontWeight: '600' }}>取消</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: tc.cardSubBg }]} onPress={() => setDeleteConfirmVisible(false)}><Text style={{ color: tc.labelText, fontWeight: '600' }}>取消</Text></TouchableOpacity>
                             <TouchableOpacity style={[styles.saveBtn, { backgroundColor: COLORS.pink }]} onPress={confirmDelete}><Text style={{ color: '#fff', fontWeight: '600' }}>删除</Text></TouchableOpacity>
                         </View>
                     </View>
@@ -194,7 +194,7 @@ export default function CalendarScreen({ route }) {
                             {filterCategory !== 'all' && availableItems.length > 0 && (<>
                                 <Text style={[styles.filterLabel, { color: tc.textMain }]}>三级 · 具体物品（共 {availableItems.length} 项，按记录条数排序）</Text>
                                 <TextInput style={[styles.filterSearch, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]} placeholder="输入物品名称搜索" placeholderTextColor={tc.textLight} value={itemSearch} onChangeText={setItemSearch} />
-                                <ScrollView keyboardShouldPersistTaps="handled" style={styles.filterItemScroll} showsVerticalScrollIndicator={true}>
+                                <View style={{ marginBottom: 4 }}>
                                     <View style={styles.filterRow}>
                                         <TouchableOpacity style={[styles.filterChip, { backgroundColor: tc.chipBg, borderColor: tc.border }, !filterItem && styles.filterChipActive]} onPress={() => setFilterItem(null)}>
                                             <Text style={[styles.filterChipText, { color: tc.textSub }, !filterItem && styles.filterChipTextActive]}>全部</Text>
@@ -206,10 +206,10 @@ export default function CalendarScreen({ route }) {
                                         ))}
                                     </View>
                                     {filteredItems.length === 0 && <Text style={[styles.filterEmpty, { color: tc.textSub }]}>没有匹配的物品，换个关键词试试</Text>}
-                                </ScrollView>
+                                </View>
                             </>)}
                         </ScrollView>
-                        <TouchableOpacity style={styles.applyBtn} onPress={() => setFilterModalVisible(false)}><Text style={styles.applyBtnText}>确定</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.applyBtn, { backgroundColor: tc.accent }]} onPress={() => setFilterModalVisible(false)}><Text style={[styles.applyBtnText, { color: tc.accentText }]}>确定</Text></TouchableOpacity>
                     </View>
                 </TouchableOpacity>
             </Modal>
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     saveBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: COLORS.primaryGreen, alignItems: 'center' },
     filterModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-end' },
     filterModalContent: { backgroundColor: COLORS.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SIZES.padding, paddingBottom: 30, maxHeight: '82%' },
-    filterScroll: { maxHeight: SIZES.screenHeight * 0.5 },
+    filterScroll: { maxHeight: SIZES.screenHeight * 0.62, flexShrink: 1 },
     filterSearch: { backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e0e0e0', paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: COLORS.textMain, marginTop: 4, marginBottom: 8 },
     filterItemScroll: { maxHeight: 210, marginBottom: 4 },
     filterEmpty: { fontSize: 12, color: COLORS.textSub, textAlign: 'center', paddingVertical: 10 },
