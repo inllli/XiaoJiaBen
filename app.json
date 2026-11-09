@@ -15,6 +15,7 @@
     },
     "android": {
       "package": "com.Yjia.xiaojiaoben",
+      "versionCode": 2,
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
       ],
