@@ -471,8 +471,13 @@ export default function UserScreen() {
                             <>
                                 <Text style={[styles.updateNotes, { color: tc.textMain, fontWeight: '600' }]}>新版本 v{updateInfo.latest}（当前 v{updateInfo.current}）</Text>
                                 {updateInfo.notes ? (
-                                    <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 160, marginTop: 6 }}>
-                                        <Text style={[styles.updateNotes, { color: tc.textSub }]}>{updateInfo.notes}</Text>
+                                    <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 260, marginTop: 6 }} showsVerticalScrollIndicator={true}>
+                                        {parseReleaseNotes(updateInfo.notes).map((line, i) => (
+                                            <Text
+                                                key={i}
+                                                style={[styles.updateNotes, { color: line.heading ? tc.textMain : tc.textSub }, line.heading && { fontWeight: '600', marginTop: 8 }]}
+                                            >{line.text}</Text>
+                                        ))}
                                     </ScrollView>
                                 ) : null}
                                 {updateDownloading ? (
@@ -703,6 +708,27 @@ export default function UserScreen() {
         </View>
     );
 }
+
+// 把 GitHub Release 的 Markdown 说明转成 App 内可读的纯文本行：去掉 #、**、` 等标记，
+// 记录哪些行原本是小标题，渲染时单独加粗，避免弹窗里出现一堆语法符号
+const parseReleaseNotes = (raw) => {
+    const lines = String(raw || '').replace(/\r/g, '').split('\n');
+    const out = [];
+    lines.forEach(line => {
+        const heading = /^#{1,6}\s+/.test(line);
+        const text = line
+            .replace(/^#{1,6}\s+/, '')
+            .replace(/\*\*([^*]+)\*\*/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/^\s*[-*]\s+/, '· ')
+            .replace(/^\s*>\s*/, '')
+            .trim();
+        if (text) out.push({ text, heading });
+    });
+    // 首行通常就是「小家本 vX.Y.Z 更新说明」，弹窗顶部已经写了版本号，这里跳过
+    if (out.length && out[0].heading) out.shift();
+    return out;
+};
 
 const styles = StyleSheet.create({
     container: { flex: 1, paddingTop: 60 },

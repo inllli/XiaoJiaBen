@@ -56,28 +56,48 @@ export async function checkUpdate() {
     }
 }
 
+// 国内直连 github.com 的 release 附件经常不通（api.github.com 却能连），
+// 所以下载按顺序尝试：直连 → 几个 GitHub 加速镜像 → 全失败才提示开 VPN
+const APK_MIRRORS = [
+    '',
+    'https://ghfast.top/',
+    'https://ghproxy.net/',
+    'https://gh-proxy.com/',
+];
+
 // 下载 APK 并调起系统安装器（仅 Android；iOS 请走 App Store）
 export async function downloadAndInstallApk(apkUrl, onProgress) {
     if (Platform.OS !== 'android') {
         return { ok: false, message: 'iOS 不支持侧载安装，请前往 App Store 更新' };
     }
     if (!apkUrl) return { ok: false, message: '该版本没有附带 apk 安装包' };
-    try {
-        const target = `${FileSystem.cacheDirectory}xiaojia-ble-update.apk`;
-        const task = FileSystem.createDownloadResumable(apkUrl, target, {}, p => {
-            if (p.totalBytesExpectedToWrite > 0 && onProgress) {
-                onProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
-            }
-        });
-        const result = await task.downloadAsync();
-        const contentUri = await FileSystem.getContentUriAsync(result.uri);
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-            data: contentUri,
-            type: 'application/vnd.android.package-archive',
-            flags: 1,
-        });
-        return { ok: true };
-    } catch (e) {
-        return { ok: false, message: e.message };
+    const target = `${FileSystem.cacheDirectory}xiaojia-ble-update.apk`;
+    let lastError = '';
+    for (let i = 0; i < APK_MIRRORS.length; i++) {
+        const src = APK_MIRRORS[i] ? APK_MIRRORS[i] + apkUrl : apkUrl;
+        try {
+            if (onProgress) onProgress(0);
+            const task = FileSystem.createDownloadResumable(src, target, {}, p => {
+                if (p.totalBytesExpectedToWrite > 0 && onProgress) {
+                    onProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
+                }
+            });
+            const result = await task.downloadAsync();
+            if (!result) { lastError = '没有返回下载结果'; continue; }
+            if (result.status && result.status !== 200) { lastError = `HTTP ${result.status}`; continue; }
+            // 镜像有时会返回一张 HTML 错误页，用体积挡一下，免得把坏文件交给安装器
+            const info = await FileSystem.getInfoAsync(target, { size: true });
+            if (!info.exists || (info.size || 0) < 1024 * 1024) { lastError = '安装包下载不完整'; continue; }
+            const contentUri = await FileSystem.getContentUriAsync(target);
+            await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+                data: contentUri,
+                type: 'application/vnd.android.package-archive',
+                flags: 1,
+            });
+            return { ok: true };
+        } catch (e) {
+            lastError = e.message || String(e);
+        }
     }
+    return { ok: false, message: `下载失败（${lastError || '网络不通'}）。国内网络请开启 VPN 或加速器后重试` };
 }

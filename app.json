@@ -2,7 +2,7 @@
   "expo": {
     "name": "小家本",
     "slug": "xiaojiaben-app",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.Yjia.xiaojiaoben",
-      "versionCode": 2,
+      "versionCode": 3,
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
       ],
