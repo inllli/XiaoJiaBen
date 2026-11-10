@@ -6,9 +6,27 @@ import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS, THEME_COLORS } from '../theme';
 import { searchColorNames, contrastText } from '../colorNames';
 import { checkUpdate, downloadAndInstallApk, UPDATE_CONFIG } from '../updater';
+import { getPermissionStatus, requestPermission, openNotifSettings, openBatterySettings, openPermissionSettings } from '../notifications';
 
 // 行高（初次测量前的默认值）
 const ROW_H = 48;
+
+// 文件大小：B / KB / MB
+const formatSize = (bytes) => {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+};
+
+// 导出时刻：YYYY-MM-DD HH:mm
+const formatArchiveTime = (ms) => {
+    const n = Number(ms) || 0;
+    if (n <= 0) return '';
+    const d = new Date(n);
+    const p = (v) => (v < 10 ? '0' + v : '' + v);
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 // 偏好行子组件
 const PrefRow = ({
@@ -80,8 +98,16 @@ const PrefRow = ({
 };
 
 export default function UserScreen() {
-    const { exportData, importData, clearAllData, themeBg, themeColors: tc, updateTheme, exportLogs, debugLogs, customOptions, updateCustomOptionList, nickname, updateNickname } = useContext(AppContext);
+    const { exportData, importData, clearAllData, themeBg, themeColors: tc, updateTheme, exportLogs, debugLogs, customOptions, updateCustomOptionList, nickname, updateNickname, notifPrefs, updateNotifPrefs, collectArchiveFiles, deleteArchiveFiles, pickArchiveDir } = useContext(AppContext);
     const [settingsVisible, setSettingsVisible] = useState(false);
+    // 消息提醒弹窗
+    const [notifVisible, setNotifVisible] = useState(false);
+    // 通知权限状态：只有它能自动检测，其余系统开关只能跳转引导
+    const [notifPermStatus, setNotifPermStatus] = useState('undetermined');
+    // 本地存档清理：文件清单 + 手动勾选
+    const [archiveVisible, setArchiveVisible] = useState(false);
+    const [archiveFiles, setArchiveFiles] = useState([]);
+    const [archivePick, setArchivePick] = useState({});
     // 昵称最多 6 个字符：末尾是英文字母说明拼音还没上屏，此时不截断，否则输入法组词会被打断
     const handleNickChange = (t) => {
         const chars = Array.from(t || '');
@@ -90,6 +116,61 @@ export default function UserScreen() {
         else updateNickname(t);
     };
     const normalizeNick = () => updateNickname(Array.from(nickname || '').slice(0, 6).join(''));
+    // 本地存档：进页面读一次清单（沙盒残留 + 用户上次保存目录），点卡片时再刷新
+    useEffect(() => {
+        let alive = true;
+        collectArchiveFiles()
+            .then(r => { if (alive) setArchiveFiles((r && r.list) || []); })
+            .catch(() => { });
+        return () => { alive = false; };
+    }, []);
+    const openArchive = async () => {
+        try {
+            const r = await collectArchiveFiles();
+            setArchiveFiles((r && r.list) || []);
+        } catch (e) { }
+        setArchivePick({});
+        setArchiveVisible(true);
+    };
+    const toggleArchivePick = (uri) => setArchivePick(prev => ({ ...prev, [uri]: !prev[uri] }));
+    const archivePickedCount = archiveFiles.filter(f => archivePick[f.uri]).length;
+    const chooseArchiveDir = async () => {
+        const dir = await pickArchiveDir();
+        if (!dir) { setTipMsg('已取消，或没有授予目录访问权限'); setTipVisible(true); return; }
+        let r = { list: [], scanned: 0 };
+        try { r = await collectArchiveFiles(); } catch (e) { }
+        setArchiveFiles((r && r.list) || []);
+        const savedCount = ((r && r.list) || []).filter(f => f.where === 'saved').length;
+        setTipMsg(savedCount > 0
+            ? `已读取到 ${savedCount} 个存档文件`
+            : `这个目录里没有小家本的存档文件（读到 ${(r && r.scanned) || 0} 个条目）`);
+        setTipVisible(true);
+    };
+    // 消息提醒开关：首次开启时申请通知权限；被拒就提示去系统设置
+    const toggleNotif = async (key) => {
+        const enabled = !notifPrefs[key];
+        updateNotifPrefs({ [key]: enabled });
+        const next = { ...notifPrefs, [key]: enabled };
+        if (!next.checkIn && !next.expiring && !next.expired) return;
+        const status = await getPermissionStatus();
+        if (status !== 'granted') {
+            const ok = await requestPermission();
+            if (!ok) { setTipMsg('未获得通知权限，正在打开系统通知设置'); setTipVisible(true); openNotifSettings().catch(() => { }); }
+        }
+    };
+    // 打开消息提醒弹窗时顺手刷新一次通知权限
+    const openNotifModal = async () => {
+        setNotifVisible(true);
+        try { setNotifPermStatus(await getPermissionStatus()); } catch (e) { }
+    };
+    const refreshNotifPerm = async () => {
+        try { setNotifPermStatus(await getPermissionStatus()); } catch (e) { }
+    };
+    // 系统设置引导：跳不过去就给文字兜底
+    const gotoSystemSetting = async (fn) => {
+        const ok = await fn();
+        if (!ok) { setTipMsg('没找到对应的设置页，请手动到 系统设置 → 应用管理 → 小家本 里设置'); setTipVisible(true); }
+    };
     const [customColor, setCustomColor] = useState('#f7f6f1');
     const [colorPreview, setColorPreview] = useState('');
     // 颜色名检索结果（输入「雾霾蓝」这类名称时展示候选色块）
@@ -455,7 +536,9 @@ export default function UserScreen() {
                 {renderCard('📥', '数据恢复导入', '从本地文件恢复数据', importData)}
                 {renderCard('📄', '导出调试日志', '导出用于排查问题的日志文件', exportLogs)}
                 {renderCard('📋', '复制调试日志', '将日志复制到剪贴板', copyLogs)}
+                {renderCard('🗂️', '清理本地存档', archiveFiles.length > 0 ? `已检测到 ${archiveFiles.length} 个存档文件，可勾选删除` : '导出生成的备份与日志文件', openArchive)}
                 {renderCard('⚙️', '偏好设置', '标签管理、自定义偏好', () => setSettingsVisible(true))}
+                {renderCard('🔔', '消息提醒', '打卡、临期、过期提醒开关', openNotifModal)}
                 {Platform.OS === 'android' && renderCard('⬆️', '升级更新', updateInfo && updateInfo.hasUpdate ? `发现新版本 v${updateInfo.latest}` : '检查并安装新版本（不强制升级）', openUpdateModal, !!(updateInfo && updateInfo.hasUpdate))}
             </ScrollView>
 
@@ -499,6 +582,55 @@ export default function UserScreen() {
                                 {updateInfo.configured === false ? '更新通道未配置（请先在 src/updater.js 填写 GitHub 仓库）' : (updateInfo.error ? ('检查失败：' + updateInfo.error) : '已是最新版本')}
                             </Text>
                         ) : null}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+            <Modal visible={notifVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setNotifVisible(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setNotifVisible(false)}>
+                    <View style={[styles.updateModal, { backgroundColor: tc.modalBg }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: tc.textMain }]}>消息提醒</Text>
+                            <TouchableOpacity onPress={() => setNotifVisible(false)}><Text style={{ fontSize: 22, color: tc.textSub }}>✕</Text></TouchableOpacity>
+                        </View>
+                        <ScrollView showsVerticalScrollIndicator={false} bounces={false} style={{ flexShrink: 1 }}>
+                        {[
+                            ['checkIn', '打卡提醒', '按条目里设置的提醒时间推送；App 里打过卡后当天不再提醒'],
+                            ['expiring', '临期提醒', '到期前 N 天提醒，只提醒填了「临期提前提醒(天)」的条目'],
+                            ['expired', '过期提醒', '到期当天上午 9:00 提醒'],
+                        ].map(([key, title, sub]) => (
+                            <TouchableOpacity key={key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: tc.border }} onPress={() => toggleNotif(key)}>
+                                <View style={{ flex: 1, paddingRight: 12 }}>
+                                    <Text style={{ color: tc.textMain, fontWeight: '600' }}>{title}</Text>
+                                    <Text style={{ color: tc.textSub, fontSize: 12, marginTop: 4, lineHeight: 18 }}>{sub}</Text>
+                                </View>
+                                <View style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 14, backgroundColor: notifPrefs[key] ? tc.accent : tc.cardSubBg }}>
+                                    <Text style={{ color: notifPrefs[key] ? tc.accentText : tc.textSub, fontSize: 13, fontWeight: '600' }}>{notifPrefs[key] ? '开' : '关'}</Text>
+                                </View>
+                            </TouchableOpacity>
+                        ))}
+                        <Text style={{ color: tc.textSub, fontSize: 12, marginTop: 14, lineHeight: 19 }}>提醒是本地通知，不需要联网。若收不到：系统设置里允许「小家本」通知，并允许自启动、关闭电池优化限制。</Text>
+
+                        <Text style={{ color: tc.textMain, fontWeight: '600', marginTop: 18, marginBottom: 4 }}>系统提醒设置</Text>
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }} onPress={refreshNotifPerm}>
+                            <View style={{ width: 8, height: 8, borderRadius: 4, marginRight: 8, backgroundColor: notifPermStatus === 'granted' ? tc.accent : '#D9534F' }} />
+                            <Text style={{ color: tc.textSub, fontSize: 12, flex: 1 }}>{notifPermStatus === 'granted' ? '通知权限：已允许' : '通知权限：未允许，系统会把提醒拦掉'}</Text>
+                            <Text style={{ color: tc.accent, fontSize: 12, fontWeight: '600' }}>重新检测</Text>
+                        </TouchableOpacity>
+                        {[
+                            ['通知', '允许通知、横幅、锁屏显示', openNotifSettings],
+                            ['省电策略', '改成「无限制」，不要留「智能省电」', openBatterySettings],
+                            ['自启动 / 后台弹出', '小米·红米在这一页把这两项都打开', openPermissionSettings],
+                        ].map(([title, sub, fn]) => (
+                            <TouchableOpacity key={title} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: tc.border }} onPress={() => gotoSystemSetting(fn)}>
+                                <View style={{ flex: 1, paddingRight: 10 }}>
+                                    <Text style={{ color: tc.textMain, fontSize: 13, fontWeight: '600' }}>{title}</Text>
+                                    <Text style={{ color: tc.textSub, fontSize: 11, marginTop: 3, lineHeight: 16 }}>{sub}</Text>
+                                </View>
+                                <Text style={{ color: tc.accent, fontSize: 12, fontWeight: '600' }}>去设置 ›</Text>
+                            </TouchableOpacity>
+                        ))}
+                        <Text style={{ color: tc.textSub, fontSize: 11, marginTop: 10, lineHeight: 17 }}>手动路径：设置 → 应用设置 → 小家本 → 自启动 / 省电策略。部分机型操作步骤不一致，具体以官方设置为准，该路径仅供参考。</Text>
+                        </ScrollView>
                     </View>
                 </TouchableOpacity>
             </Modal>
@@ -700,6 +832,79 @@ export default function UserScreen() {
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.dialogBtn, { flex: 1, backgroundColor: COLORS.pink }]} onPress={() => { clearAllData(); setClearConfirmVisible(false); setSettingsVisible(false); }}>
                                 <Text style={{ color: '#fff', fontWeight: '600' }}>确认清除</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* 本地存档清理：列出检测到的文件，手动勾选后删除 */}
+            <Modal visible={archiveVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setArchiveVisible(false)}>
+                <View style={styles.dialogOverlay}>
+                    <View style={[styles.dialogContent, { backgroundColor: tc.modalBg }]}>
+                        <Text style={[styles.modalTitle, { color: tc.textMain, textAlign: 'center' }]}>清理本地存档</Text>
+                        <Text style={{ fontSize: 13, color: tc.textSub, marginTop: 8, textAlign: 'center' }}>
+                            {archiveFiles.length > 0 ? `检测到 ${archiveFiles.length} 个文件，勾选后删除` : '没有检测到存档文件'}
+                        </Text>
+                        {archiveFiles.length > 0 ? (
+                            <ScrollView style={{ maxHeight: 250, marginTop: 10 }} showsVerticalScrollIndicator={true}>
+                                {archiveFiles.map(f => {
+                                    const picked = !!archivePick[f.uri];
+                                    return (
+                                        <TouchableOpacity
+                                            key={f.uri}
+                                            activeOpacity={0.8}
+                                            onPress={() => toggleArchivePick(f.uri)}
+                                            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}
+                                        >
+                                            <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: picked ? tc.accent : tc.textLight, backgroundColor: picked ? tc.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                                                {picked ? <Text style={{ fontSize: 11, color: tc.accentText }}>✓</Text> : null}
+                                            </View>
+                                            <View style={{ flex: 1, marginLeft: 10 }}>
+                                                <Text numberOfLines={1} style={{ fontSize: 13, color: tc.textMain }}>{f.name}</Text>
+                                                <Text style={{ fontSize: 11, color: tc.textLight, marginTop: 2 }}>
+                                                    {[formatArchiveTime(f.mtime), f.where === 'saved' ? '本地保存目录' : '应用沙盒', f.size > 0 ? formatSize(f.size) : ''].filter(Boolean).join(' · ')}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        ) : null}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                            <TouchableOpacity onPress={() => {
+                                if (archiveFiles.length === 0) return;
+                                if (archivePickedCount === archiveFiles.length) { setArchivePick({}); return; }
+                                const all = {};
+                                archiveFiles.forEach(f => { all[f.uri] = true; });
+                                setArchivePick(all);
+                            }}>
+                                <Text style={{ fontSize: 13, color: tc.accent }}>{archiveFiles.length > 0 && archivePickedCount === archiveFiles.length ? '取消全选' : '全选'}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={chooseArchiveDir}>
+                                <Text style={{ fontSize: 13, color: tc.textSub }}>换一个目录</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                            <TouchableOpacity style={[styles.dialogBtn, { flex: 1, marginTop: 0, backgroundColor: tc.cardSubBg }]} onPress={() => setArchiveVisible(false)}>
+                                <Text style={{ color: tc.labelText, fontWeight: '600' }}>关闭</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.dialogBtn, { flex: 1, marginTop: 0, backgroundColor: archivePickedCount > 0 ? COLORS.pink : tc.cardSubBg }]}
+                                onPress={async () => {
+                                    if (archivePickedCount === 0) return;
+                                    const uris = archiveFiles.filter(f => archivePick[f.uri]).map(f => f.uri);
+                                    const n = await deleteArchiveFiles(uris);
+                                    setArchivePick({});
+                                    try {
+                                        const r = await collectArchiveFiles();
+                                        setArchiveFiles((r && r.list) || []);
+                                    } catch (e) { }
+                                    setTipMsg(n > 0 ? `已删除 ${n} 个文件` : '删除失败，可能缺少目录权限');
+                                    setTipVisible(true);
+                                }}
+                            >
+                                <Text style={{ color: archivePickedCount > 0 ? '#fff' : tc.labelText, fontWeight: '600' }}>删除选中{archivePickedCount > 0 ? `（${archivePickedCount}）` : ''}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>

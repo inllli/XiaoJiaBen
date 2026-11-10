@@ -6,6 +6,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS } from '../theme';
 import AddItemModal from '../components/AddItemModal';
+import { localDateStr } from '../dateUtils';
 
 // 排序行高（首次测量前的默认值）：行高 + 8px 行间距
 const ORDER_ROW_H = 62;
@@ -298,7 +299,7 @@ export default function LifeScreen() {
         addHabitRecord('经期记录', desc); setPeriodModalVisible(false);
     };
     const handleDeleteLastRecord = (targetName, recordCategory = 'habit') => {
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDateStr();
         const todayRecords = calendarData[today] || [];
         // 修复：按列表展示的时间（记录产生时间 time）倒序取最近一条，而不是按入库顺序（操作时间）
         // 补打卡记录的入库时间晚但产生时间可能更早，数组头部是操作时间最新的，删它会删错记录
@@ -326,7 +327,7 @@ export default function LifeScreen() {
     };
     const submitBackfill = () => {
         const timeStr = `${String(backfillTime.getHours()).padStart(2, '0')}:${String(backfillTime.getMinutes()).padStart(2, '0')}:${String(backfillTime.getSeconds()).padStart(2, '0')}`;
-        const dateStr = backfillTime.toISOString().split('T')[0];
+        const dateStr = localDateStr(backfillTime);
         if (backfillTarget.category === 'medicine') { addMedicineCheckInRecord(backfillTarget.name, backfillTarget.dose, backfillTarget.unit, timeStr, backfillNote, dateStr, backfillAssociate); }
         else if (backfillTarget.category === 'inventory') { addItemCheckInRecord(backfillTarget.name, backfillTarget.dose, backfillTarget.unit, timeStr, backfillNote, dateStr, backfillAssociate); }
         else { addHabitRecord(backfillTarget.name, backfillTags.join(', ') || backfillNote || '补打卡', timeStr, dateStr); }
@@ -372,7 +373,7 @@ export default function LifeScreen() {
                 </View>
 
                 {checkInList.map(row => {
-                    const today = new Date().toISOString().split('T')[0];
+                    const today = localDateStr();
                     const isMed = row.__type === 'medicine';
                     const isHabit = row.__type === 'habit';
                     const isItem = row.__type === 'item';

@@ -6,9 +6,20 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import ImageCropModal from './ImageCropModal';
 import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS } from '../theme';
+import { MAX_REMIND_TIMES, ADVANCE_OPTIONS, requestPermission } from '../notifications';
+import { localDateStr } from '../dateUtils';
 
 // 是否为真实图片封面（file / content / http / data:image），否则视为模板 emoji
 const isCoverUri = (c) => typeof c === 'string' && /^(file|content|http|data:image)/.test(c);
+
+// 打卡提醒字段：新建/编辑共用一套取值，旧数据缺字段时补默认（默认关闭）
+const remindFrom = (src) => ({
+    remindOn: !!(src && src.remindOn),
+    remindRepeat: (src && src.remindRepeat) || 'daily',
+    remindWeekdays: (src && Array.isArray(src.remindWeekdays)) ? src.remindWeekdays : [],
+    remindTimes: (src && Array.isArray(src.remindTimes)) ? src.remindTimes : [],
+    remindAdvance: Number((src && src.remindAdvance) || 0),
+});
 
 export default function AddItemModal({ visible, onClose, editItem, editHabit }) {
     const { addItem, editItem: updateItem, addHabit, editHabit: updateHabit, deleteHabit, customOptions, addCustomOption, showToast, addLogEntry, themeColors: tc } = useContext(AppContext);
@@ -16,13 +27,15 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
     const [exitConfirmVisible, setExitConfirmVisible] = useState(false);
     const [activeTab, setActiveTab] = useState('item');
 
-    const [itemForm, setItemForm] = useState({ name: '', stock: '1.0', unit: '盒', category: '食品', threshold: '', expireDays: '', noExpire: true, expireDate: '', purpose: '', remark: '', enableCheckIn: false, associateInventory: false });
+    const [itemForm, setItemForm] = useState({ name: '', stock: '1.0', unit: '盒', category: '食品', threshold: '', expireDays: '', noExpire: true, expireDate: '', purpose: '', remark: '', enableCheckIn: false, associateInventory: false, ...remindFrom(null) });
     const [itemLocations, setItemLocations] = useState([]);
-    const [itemCovers, setItemCovers] = useState(['🥛']);
+    const [itemCovers, setItemCovers] = useState([]); // 新建默认不预选封面，由用户自己挑；保存时无封面仍兜底 📦
     // 待裁切图片：{ uri, isMed }；null 表示未在裁切
     const [cropState, setCropState] = useState(null);
-    const [medForm, setMedForm] = useState({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', locations: [], purpose: '', threshold: '', expireDays: '' });
-    const [habitForm, setHabitForm] = useState({ name: '', quickCheckIn: false, tags: [], icon: '⭐', frequency: '', startDate: '', endDate: '' });
+    const [medForm, setMedForm] = useState({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: [], enableCheckIn: false, associateInventory: false, unit: '粒', locations: [], purpose: '', threshold: '', expireDays: '', ...remindFrom(null) });
+    const [habitForm, setHabitForm] = useState({ name: '', quickCheckIn: false, tags: [], icon: '⭐', frequency: '', startDate: '', endDate: '', ...remindFrom(null) });
+    // 打卡提醒的时间点选择器：{ scope: 'item'|'med'|'habit', index: number }，index=-1 表示新增
+    const [remindPicker, setRemindPicker] = useState(null);
 
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [customCategory, setCustomCategory] = useState('');
@@ -103,7 +116,8 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                         purpose: editItem.purpose || '',
                         threshold: editItem.threshold !== undefined ? editItem.threshold : '',
                         expireDays: editItem.expireDays !== undefined ? editItem.expireDays : '',
-                        associateInventory: editItem.associateInventory || false
+                        associateInventory: editItem.associateInventory || false,
+                        ...remindFrom(editItem)
                     });
                 } else {
                     setActiveTab('item');
@@ -117,7 +131,8 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                         purpose: editItem.purpose || '',
                         remark: editItem.remark || '',
                         enableCheckIn: editItem.enableCheckIn || false,
-                        associateInventory: editItem.associateInventory || false
+                        associateInventory: editItem.associateInventory || false,
+                        ...remindFrom(editItem)
                     });
                     setItemCovers(editItem.covers || [editItem.cover || '📦']);
                     setItemLocations((editItem.locations ? editItem.locations.split('、') : (editItem.location ? [editItem.location] : [])).filter(l => l !== '未指定'));
@@ -126,13 +141,13 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                 setIsEditMode(true);
                 safeLog('Form', `打开编辑习惯: ${editHabit.name}`);
                 setActiveTab('habit');
-                setHabitForm({ name: editHabit.name, quickCheckIn: editHabit.quickCheckIn, tags: editHabit.tags || [], icon: editHabit.icon || '⭐', frequency: editHabit.frequency || '', startDate: editHabit.startDate || '', endDate: editHabit.endDate || '' });
+                setHabitForm({ name: editHabit.name, quickCheckIn: editHabit.quickCheckIn, tags: editHabit.tags || [], icon: editHabit.icon || '⭐', frequency: editHabit.frequency || '', startDate: editHabit.startDate || '', endDate: editHabit.endDate || '', ...remindFrom(editHabit) });
             } else {
                 setIsEditMode(false);
                 setActiveTab('item');
                 setItemForm({ name: '', stock: '1.0', unit: '盒', category: '食品', threshold: '', expireDays: '', noExpire: true, expireDate: '', purpose: '', remark: '', enableCheckIn: false, associateInventory: false });
-                setItemCovers(['🥛']); setItemLocations([]);
-                setMedForm({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: ['💊'], enableCheckIn: false, associateInventory: false, unit: '粒', purpose: '' });
+                setItemCovers([]); setItemLocations([]);
+                setMedForm({ name: '', dose: '1', freq: '', timing: '不限', time: '08:30', stock: '30', remark: '', noExpire: true, expireDate: '', covers: [], enableCheckIn: false, associateInventory: false, unit: '粒', purpose: '' });
                 setHabitForm({ name: '', quickCheckIn: false, tags: [], icon: '⭐', frequency: '', startDate: '', endDate: '' });
                 setShowCustomCategory(false); setCustomCategory(''); setShowCustomUnit(false); setCustomUnit('');
                 setShowCustomLocation(false); setCustomLocation(''); setShowCustomMedUnit(false); setCustomMedUnit('');
@@ -151,10 +166,113 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
         setTimeout(() => setToastVisible(false), 2000);
     };
 
+    // 打卡提醒：改时间 / 加时间 / 删时间，按 scope 落到对应表单
+    const applyRemindTime = (pick, hhmm) => {
+        const apply = (prev) => {
+            const times = Array.isArray(prev.remindTimes) ? [...prev.remindTimes] : [];
+            if (pick.index >= 0) times[pick.index] = hhmm;
+            else times.push(hhmm);
+            return { ...prev, remindTimes: times.slice(0, MAX_REMIND_TIMES) };
+        };
+        if (pick.scope === 'item') setItemForm(apply);
+        else if (pick.scope === 'med') setMedForm(apply);
+        else setHabitForm(apply);
+    };
+
+    const removeRemindTime = (scope, index) => {
+        const apply = (prev) => {
+            const times = Array.isArray(prev.remindTimes) ? [...prev.remindTimes] : [];
+            times.splice(index, 1);
+            return { ...prev, remindTimes: times };
+        };
+        if (scope === 'item') setItemForm(apply);
+        else if (scope === 'med') setMedForm(apply);
+        else setHabitForm(apply);
+    };
+
+    // 打卡提醒设置区（物品 / 药品 / 习惯共用同一套控件与样式）
+    const renderRemindBlock = (form, setForm, scope, isMed) => (
+        <>
+            <View style={[styles.row, { marginTop: 10 }]}>
+                <Text style={[styles.label, { color: tc.textMain }]}>打卡提醒</Text>
+                <TouchableOpacity style={[styles.tag, form.remindOn && styles.tagActive]} onPress={() => {
+                    if (form.remindOn) { setForm({ ...form, remindOn: false }); return; }
+                    // 开启时不预设时间：药品固定时间沿用服药时间，其余留空由用户自己添加
+                    const times = (Array.isArray(form.remindTimes) && form.remindTimes.length > 0)
+                        ? form.remindTimes
+                        : ((isMed && form.timing === '固定时间' && form.time) ? [form.time] : []);
+                    setForm({ ...form, remindOn: true, remindTimes: times });
+                    // 开启时顺手要一次通知权限（没有权限就排不进系统）
+                    requestPermission().catch(() => {});
+                }}>
+                    <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, form.remindOn && styles.tagTextActive]}>{form.remindOn ? '已开启' : '未开启'}</Text>
+                </TouchableOpacity>
+            </View>
+            {form.remindOn && (<>
+                <Text style={[styles.label, { color: tc.textMain }]}>提醒重复</Text>
+                <View style={styles.tagGroup}>
+                    {[['daily', '每天'], ['odd', '隔日'], ['weekly', '每周']].map(([key, label]) => (
+                        <TouchableOpacity key={key} style={[styles.tag, (form.remindRepeat || 'daily') === key && styles.tagActive]} onPress={() => {
+                            const patch = { remindRepeat: key };
+                            if (key === 'weekly' && (!Array.isArray(form.remindWeekdays) || form.remindWeekdays.length === 0)) patch.remindWeekdays = [new Date().getDay()];
+                            setForm({ ...form, ...patch });
+                        }}>
+                            <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, (form.remindRepeat || 'daily') === key && styles.tagTextActive]}>{label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+                {(form.remindRepeat || 'daily') === 'weekly' && (
+                    <View style={styles.tagGroup}>
+                        {['日', '一', '二', '三', '四', '五', '六'].map((label, i) => (
+                            <TouchableOpacity key={i} style={[styles.tag, (form.remindWeekdays || []).includes(i) && styles.tagActive]} onPress={() => {
+                                const cur = Array.isArray(form.remindWeekdays) ? form.remindWeekdays : [];
+                                const next = cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i].sort((a, b) => a - b);
+                                if (next.length === 0) return; // 一周至少要留一天
+                                setForm({ ...form, remindWeekdays: next });
+                            }}>
+                                <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, (form.remindWeekdays || []).includes(i) && styles.tagTextActive]}>{label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+                <Text style={[styles.label, { color: tc.textMain }]}>提醒时间（可多个，最多 {MAX_REMIND_TIMES} 个）</Text>
+                <View style={styles.tagGroup}>
+                    {(form.remindTimes || []).map((t, i) => (
+                        <View key={i} style={[styles.tag, styles.tagActive, { flexDirection: 'row', alignItems: 'center' }]}>
+                            <TouchableOpacity onPress={() => setRemindPicker({ scope, index: i })}>
+                                <Text style={styles.tagTextActive}>{t}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => removeRemindTime(scope, i)} style={{ marginLeft: 8 }}>
+                                <Text style={styles.tagTextActive}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ))}
+                    {(form.remindTimes || []).length < MAX_REMIND_TIMES && (
+                        <TouchableOpacity style={styles.tag} onPress={() => setRemindPicker({ scope, index: -1 })}>
+                            <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }]}>+ 添加时间</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+                <Text style={[styles.label, { color: tc.textMain }]}>提前提醒</Text>
+                <View style={styles.tagGroup}>
+                    {ADVANCE_OPTIONS.map(v => (
+                        <TouchableOpacity key={v} style={[styles.tag, Number(form.remindAdvance || 0) === v && styles.tagActive]} onPress={() => setForm({ ...form, remindAdvance: v })}>
+                            <Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, Number(form.remindAdvance || 0) === v && styles.tagTextActive]}>{v === 0 ? '不提前' : v + ' 分钟前'}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            </>)}
+        </>
+    );
+
+    // 开启了打卡提醒却没选提醒时间 → 保存时拦截
+    const isRemindTimeMissing = (form) => !!(form && form.remindOn) && (!Array.isArray(form.remindTimes) || form.remindTimes.length === 0);
+
     const handleSave = () => {
         safeLog('Save', `点击保存，当前Tab: ${activeTab}`);
         if (activeTab === 'item') {
             if (!itemForm.name || String(itemForm.name).trim() === '') { showToastCustom('请输入物品名称'); return; }
+            if (isRemindTimeMissing(itemForm)) { showToastCustom('请选择提醒时间'); return; }
             const finalUnit = showCustomUnit && customUnit ? customUnit : itemForm.unit;
             const finalCategory = showCustomCategory && customCategory ? customCategory : itemForm.category;
             // 自定义写回对应偏好 key
@@ -186,6 +304,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
             if (editItem) { if (updateItem) updateItem(editItem.id, finalData); } else { if (addItem) addItem(finalData); }
         } else if (activeTab === 'medicine') {
             if (!medForm.name || String(medForm.name).trim() === '') { showToastCustom('请输入药品名称'); return; }
+            if (isRemindTimeMissing(medForm)) { showToastCustom('请选择提醒时间'); return; }
             const finalFreq = showCustomMedFreq && customMedFreq ? customMedFreq : medForm.freq;
             const finalUnit = showCustomMedUnit && customMedUnit ? customMedUnit : medForm.unit;
             // 自定义写回对应偏好 key
@@ -214,6 +333,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
             if (editItem) { if (updateItem) updateItem(editItem.id, finalData); } else { if (addItem) addItem(finalData); }
         } else if (activeTab === 'habit') {
             if (!habitForm.name || String(habitForm.name).trim() === '') { showToastCustom('请输入习惯名称'); return; }
+            if (isRemindTimeMissing(habitForm)) { showToastCustom('请选择提醒时间'); return; }
             const finalFreq = showCustomHabitFreq && customHabitFreq ? customHabitFreq : habitForm.frequency;
             const finalData = { ...habitForm, name: habitForm.name.trim(), frequency: finalFreq };
             safeLog('Save', `准备保存习惯数据: ${JSON.stringify(finalData)}`);
@@ -298,7 +418,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 {itemCovers.map((cover, index) => brokenCovers.includes(cover) ? null : (
                                     <View key={index} style={{ marginRight: 10, position: 'relative' }}>
                                         {cover.startsWith('file') || cover.startsWith('content') ? <Image source={{ uri: cover }} style={styles.templateItem} onError={() => setBrokenCovers(prev => prev.includes(cover) ? prev : [...prev, cover])} /> : <View style={[styles.templateItem, { justifyContent: 'center', alignItems: 'center', backgroundColor: tc.cardBg }]}><Text style={{ fontSize: 24 }}>{cover}</Text></View>}
-                                        {itemCovers.length > 1 && <TouchableOpacity style={styles.removeCoverBtn} onPress={() => setItemCovers(itemCovers.filter((_, i) => i !== index))}><Text style={{ color: '#fff', fontSize: 10 }}>✕</Text></TouchableOpacity>}
+                                        {<TouchableOpacity style={styles.removeCoverBtn} onPress={() => setItemCovers(itemCovers.filter((_, i) => i !== index))}><Text style={{ color: '#fff', fontSize: 10 }}>✕</Text></TouchableOpacity>}
                                     </View>
                                 ))}
                             </ScrollView>
@@ -351,7 +471,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 <Text style={[styles.label, { color: tc.textMain }]}>过期时间</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                                     <TouchableOpacity style={[styles.tag, itemForm.noExpire && styles.tagActive]} onPress={() => setItemForm({ ...itemForm, noExpire: true })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, itemForm.noExpire && styles.tagTextActive]}>无期限</Text></TouchableOpacity>
-                                    <TouchableOpacity style={[styles.tag, !itemForm.noExpire && styles.tagActive]} onPress={() => { if (itemForm.noExpire) setItemForm({ ...itemForm, noExpire: false, expireDate: new Date().toISOString().split('T')[0] }); else setItemForm({ ...itemForm, noExpire: false }); }}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, !itemForm.noExpire && styles.tagTextActive]}>指定日期</Text></TouchableOpacity>
+                                    <TouchableOpacity style={[styles.tag, !itemForm.noExpire && styles.tagActive]} onPress={() => { if (itemForm.noExpire) setItemForm({ ...itemForm, noExpire: false, expireDate: localDateStr() }); else setItemForm({ ...itemForm, noExpire: false }); }}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, !itemForm.noExpire && styles.tagTextActive]}>指定日期</Text></TouchableOpacity>
                                 </View>
                                 {!itemForm.noExpire && (
                                     <TouchableOpacity style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, justifyContent: 'center' }]} onPress={() => setShowExpireDatePicker(true)}>
@@ -362,9 +482,9 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                     if (Platform.OS === 'android') {
                                         // Android spinner：滚动不关闭、不应用，点“确定”才应用并关闭（可自由选到当日之前的日期）
                                         setShowExpireDatePicker(false);
-                                        if (e.type === 'set' && d) setItemForm({ ...itemForm, expireDate: d.toISOString().split('T')[0] });
+                                        if (e.type === 'set' && d) setItemForm({ ...itemForm, expireDate: localDateStr(d) });
                                     } else {
-                                        if (d) setItemForm({ ...itemForm, expireDate: d.toISOString().split('T')[0] });
+                                        if (d) setItemForm({ ...itemForm, expireDate: localDateStr(d) });
                                         setShowExpireDatePicker(false);
                                     }
                                 }} />}
@@ -387,10 +507,13 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 <TouchableOpacity style={[styles.tag, itemForm.enableCheckIn && styles.tagActive]} onPress={() => setItemForm({ ...itemForm, enableCheckIn: !itemForm.enableCheckIn })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, itemForm.enableCheckIn && styles.tagTextActive]}>{itemForm.enableCheckIn ? '已开启' : '未开启'}</Text></TouchableOpacity>
                             </View>
                             {itemForm.enableCheckIn && (
-                                <View style={[styles.row, { marginTop: 10 }]}>
-                                    <Text style={[styles.label, { color: tc.textMain }]}>关联库存（打卡扣库存/删记录还原）</Text>
-                                    <TouchableOpacity style={[styles.tag, itemForm.associateInventory && styles.tagActive]} onPress={() => setItemForm({ ...itemForm, associateInventory: !itemForm.associateInventory })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, itemForm.associateInventory && styles.tagTextActive]}>{itemForm.associateInventory ? '已关联' : '未关联'}</Text></TouchableOpacity>
-                                </View>
+                                <>
+                                    <View style={[styles.row, { marginTop: 10 }]}>
+                                        <Text style={[styles.label, { color: tc.textMain }]}>关联库存（打卡扣库存/删记录还原）</Text>
+                                        <TouchableOpacity style={[styles.tag, itemForm.associateInventory && styles.tagActive]} onPress={() => setItemForm({ ...itemForm, associateInventory: !itemForm.associateInventory })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, itemForm.associateInventory && styles.tagTextActive]}>{itemForm.associateInventory ? '已关联' : '未关联'}</Text></TouchableOpacity>
+                                    </View>
+                                    {renderRemindBlock(itemForm, setItemForm, 'item', false)}
+                                </>
                             )}
                             <Text style={[styles.label, { color: tc.textMain }]}>备注（限50字）</Text>
                             <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, height: 60, textAlignVertical: 'top' }]} placeholder="请输入备注" value={itemForm.remark} onChangeText={t => setItemForm({ ...itemForm, remark: t })} maxLength={50} multiline />
@@ -402,7 +525,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 {medForm.covers.map((cover, index) => brokenCovers.includes(cover) ? null : (
                                     <View key={index} style={{ marginRight: 10, position: 'relative' }}>
                                         {cover.startsWith('file') || cover.startsWith('content') ? <Image source={{ uri: cover }} style={styles.templateItem} onError={() => setBrokenCovers(prev => prev.includes(cover) ? prev : [...prev, cover])} /> : <View style={[styles.templateItem, { justifyContent: 'center', alignItems: 'center', backgroundColor: tc.cardBg }]}><Text style={{ fontSize: 24 }}>{cover}</Text></View>}
-                                        {medForm.covers.length > 1 && <TouchableOpacity style={styles.removeCoverBtn} onPress={() => setMedForm({ ...medForm, covers: medForm.covers.filter((_, i) => i !== index) })}><Text style={{ color: '#fff', fontSize: 10 }}>✕</Text></TouchableOpacity>}
+                                        {<TouchableOpacity style={styles.removeCoverBtn} onPress={() => setMedForm({ ...medForm, covers: medForm.covers.filter((_, i) => i !== index) })}><Text style={{ color: '#fff', fontSize: 10 }}>✕</Text></TouchableOpacity>}
                                     </View>
                                 ))}
                             </ScrollView>
@@ -476,7 +599,7 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                     <Text style={[styles.label, { color: tc.textMain }]}>过期时间</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                                         <TouchableOpacity style={[styles.tag, medForm.noExpire && styles.tagActive]} onPress={() => setMedForm({ ...medForm, noExpire: true })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.noExpire && styles.tagTextActive]}>无期限</Text></TouchableOpacity>
-                                        <TouchableOpacity style={[styles.tag, !medForm.noExpire && styles.tagActive]} onPress={() => { if (medForm.noExpire) setMedForm({ ...medForm, noExpire: false, expireDate: new Date().toISOString().split('T')[0] }); else setMedForm({ ...medForm, noExpire: false }); }}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, !medForm.noExpire && styles.tagTextActive]}>指定日期</Text></TouchableOpacity>
+                                        <TouchableOpacity style={[styles.tag, !medForm.noExpire && styles.tagActive]} onPress={() => { if (medForm.noExpire) setMedForm({ ...medForm, noExpire: false, expireDate: localDateStr() }); else setMedForm({ ...medForm, noExpire: false }); }}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, !medForm.noExpire && styles.tagTextActive]}>指定日期</Text></TouchableOpacity>
                                     </View>
                                     {!medForm.noExpire && <TextInput placeholderTextColor={tc.textSub}style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]} placeholder="格式：2026-12-31" value={medForm.expireDate} onChangeText={t => setMedForm({ ...medForm, expireDate: t })} />}
                                 </View>
@@ -498,10 +621,13 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                     <TouchableOpacity style={[styles.tag, medForm.enableCheckIn && styles.tagActive]} onPress={() => setMedForm({ ...medForm, enableCheckIn: !medForm.enableCheckIn })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.enableCheckIn && styles.tagTextActive]}>{medForm.enableCheckIn ? '已开启' : '未开启'}</Text></TouchableOpacity>
                                 </View>
                                 {medForm.enableCheckIn && (
-                                    <View style={[styles.row, { marginTop: 10 }]}>
-                                        <Text style={[styles.label, { color: tc.textMain }]}>关联库存（打卡扣库存/删记录还原）</Text>
-                                        <TouchableOpacity style={[styles.tag, medForm.associateInventory && styles.tagActive]} onPress={() => setMedForm({ ...medForm, associateInventory: !medForm.associateInventory })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.associateInventory && styles.tagTextActive]}>{medForm.associateInventory ? '已关联' : '未关联'}</Text></TouchableOpacity>
-                                    </View>
+                                    <>
+                                        <View style={[styles.row, { marginTop: 10 }]}>
+                                            <Text style={[styles.label, { color: tc.textMain }]}>关联库存（打卡扣库存/删记录还原）</Text>
+                                            <TouchableOpacity style={[styles.tag, medForm.associateInventory && styles.tagActive]} onPress={() => setMedForm({ ...medForm, associateInventory: !medForm.associateInventory })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, medForm.associateInventory && styles.tagTextActive]}>{medForm.associateInventory ? '已关联' : '未关联'}</Text></TouchableOpacity>
+                                        </View>
+                                        {renderRemindBlock(medForm, setMedForm, 'med', true)}
+                                    </>
                                 )}
                             </View>
 
@@ -528,18 +654,18 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                 {showStartDatePicker && <DateTimePicker value={habitForm.startDate ? new Date(habitForm.startDate) : new Date()} mode="date" display="spinner" themeVariant="light" onChange={(e, d) => {
                                     if (Platform.OS === 'android') {
                                         setShowStartDatePicker(false);
-                                        if (e.type === 'set' && d) setHabitForm({ ...habitForm, startDate: d.toISOString().split('T')[0] });
+                                        if (e.type === 'set' && d) setHabitForm({ ...habitForm, startDate: localDateStr(d) });
                                     } else {
-                                        if (d) setHabitForm({ ...habitForm, startDate: d.toISOString().split('T')[0] });
+                                        if (d) setHabitForm({ ...habitForm, startDate: localDateStr(d) });
                                         setShowStartDatePicker(false);
                                     }
                                 }} />}
                                 {showEndDatePicker && <DateTimePicker value={habitForm.endDate ? new Date(habitForm.endDate) : new Date()} mode="date" display="spinner" themeVariant="light" onChange={(e, d) => {
                                     if (Platform.OS === 'android') {
                                         setShowEndDatePicker(false);
-                                        if (e.type === 'set' && d) setHabitForm({ ...habitForm, endDate: d.toISOString().split('T')[0] });
+                                        if (e.type === 'set' && d) setHabitForm({ ...habitForm, endDate: localDateStr(d) });
                                     } else {
-                                        if (d) setHabitForm({ ...habitForm, endDate: d.toISOString().split('T')[0] });
+                                        if (d) setHabitForm({ ...habitForm, endDate: localDateStr(d) });
                                         setShowEndDatePicker(false);
                                     }
                                 }} />}
@@ -555,10 +681,12 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                                     ))}
                                 </View>
 
-                                <View style={[styles.row, { marginTop: 20 }]}>
+                                <View style={[styles.row, { marginTop: 10 }]}>
                                     <Text style={[styles.label, { color: tc.textMain }]}>开启快速打卡（跳过标签）</Text>
                                     <TouchableOpacity style={[styles.tag, habitForm.quickCheckIn && styles.tagActive]} onPress={() => setHabitForm({ ...habitForm, quickCheckIn: !habitForm.quickCheckIn })}><Text style={[styles.tagText, { color: tc.isDark ? tc.textMain : tc.textSub }, habitForm.quickCheckIn && styles.tagTextActive]}>{habitForm.quickCheckIn ? '已开启' : '未开启'}</Text></TouchableOpacity>
                                 </View>
+
+                                {renderRemindBlock(habitForm, setHabitForm, 'habit', false)}
 
                                 {editHabit && <TouchableOpacity style={styles.deleteHabitBtn} onPress={handleDeleteHabit}><Text style={styles.deleteHabitBtnText}>删除该习惯</Text></TouchableOpacity>}
                             </View>
@@ -640,6 +768,29 @@ export default function AddItemModal({ visible, onClose, editItem, editHabit }) 
                 setCropState(null);
             }}
         />
+        {/* 打卡提醒的时间点选择：新增(-1)或修改某个已存在的时间 */}
+        {remindPicker && (
+            <DateTimePicker
+                value={(() => {
+                    const form = remindPicker.scope === 'item' ? itemForm : (remindPicker.scope === 'med' ? medForm : habitForm);
+                    const t = (form.remindTimes || [])[remindPicker.index];
+                    return t ? new Date('2000-01-01T' + t + ':00') : new Date();
+                })()}
+                mode="time"
+                display="spinner"
+                themeVariant="light"
+                is24Hour={true}
+                onChange={(event, selectedDate) => {
+                    const pick = remindPicker;
+                    setRemindPicker(null);
+                    if (!event || event.type === 'dismissed') return;
+                    if (!selectedDate || !pick) return;
+                    const h = String(selectedDate.getHours()).padStart(2, '0');
+                    const m = String(selectedDate.getMinutes()).padStart(2, '0');
+                    applyRemindTime(pick, h + ':' + m);
+                }}
+            />
+        )}
         </>
     );
 }

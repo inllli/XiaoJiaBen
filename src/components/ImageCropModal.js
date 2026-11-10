@@ -142,10 +142,13 @@ export default function ImageCropModal({ visible, uri, onCancel, onConfirm }) {
         const b = boxRef.current;
         const d = getDisp();
         if (!d.scale || b.w <= 0) return;
-        const originX = Math.round((b.x - d.x) / d.scale);
-        const originY = Math.round((b.y - d.y) / d.scale);
-        const width = Math.round(b.w / d.scale);
-        const height = Math.round(b.h / d.scale);
+        // 换算回原图坐标后必须夹进图片范围：四舍五入后哪怕越界 1px，Android 也会把越界部分补成白边（封面上一道白线）
+        const iw = imgRef.current.w;
+        const ih = imgRef.current.h;
+        const originX = Math.max(0, Math.min(iw - 1, Math.round((b.x - d.x) / d.scale)));
+        const originY = Math.max(0, Math.min(ih - 1, Math.round((b.y - d.y) / d.scale)));
+        const width = Math.max(1, Math.min(iw - originX, Math.round(b.w / d.scale)));
+        const height = Math.max(1, Math.min(ih - originY, Math.round(b.h / d.scale)));
         try {
             const result = await ImageManipulator.manipulateAsync(uri, [{ crop: { originX, originY, width, height } }], { compress: 1 });
             onConfirm(result.uri);

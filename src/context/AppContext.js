@@ -6,6 +6,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Platform } from 'react-native';
 import { getThemeColors } from '../theme';
+import { localDateStr } from '../dateUtils';
+import { rescheduleAll, setupNotificationHandler } from '../notifications';
 
 export const AppContext = createContext();
 
@@ -31,6 +33,10 @@ export const AppProvider = ({ children }) => {
     const [toastMsg, setToastMsg] = useState('');
     const [toastVisible, setToastVisible] = useState(false);
     const [debugLogs, setDebugLogs] = useState([]);
+    // 消息提醒总开关（打卡/临期/过期），与条目级开关配合使用
+    const [notifPrefs, setNotifPrefs] = useState({ checkIn: true, expiring: true, expired: true });
+    // 本地数据读完之前不排通知，避免用空数据把已排的提醒清掉
+    const [dataReady, setDataReady] = useState(false);
 
     const showToast = (msg) => {
         setToastMsg(msg);
@@ -55,8 +61,82 @@ export const AppProvider = ({ children }) => {
             await FileSystem.writeAsStringAsync(fileUri, logText || '暂无日志');
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(fileUri, { mimeType: 'text/plain', dialogTitle: '导出小家本日志' });
+                await dropTmp(fileUri);
             } else { showToast('文件已保存到应用沙盒'); }
         } catch (e) { showToast('导出日志失败: ' + e.message); }
+    };
+
+    // 导出产生的存档文件：沙盒副本用完即删，用户保存的目录记住 URI，清理时逐条列出供手动勾选
+    const ARCHIVE_DIR_KEY = 'archiveDirUri';
+    const isArchiveName = (n) => /^XiaoJiaBen_(Backup|Debug)_[^\s]+\.(json|txt)$/.test(n);
+    // SAF 返回的是 content:// 文档 URI，整串解码后路径里仍带目录层级，直接从中提取文件名
+    const archiveNameFromUri = (uri) => {
+        let s = String(uri || '');
+        try { s = decodeURIComponent(s); } catch (e) { }
+        const m = s.match(/(XiaoJiaBen_(?:Backup|Debug)_[^\/\s]+\.(?:json|txt))/);
+        return m ? m[1] : null;
+    };
+    // 文件名尾部的毫秒时间戳即导出时刻（XiaoJiaBen_Backup_<ms>.json）
+    const archiveTimeFromName = (n) => {
+        const m = String(n || '').match(/_(\d{10,})\.(?:json|txt)$/);
+        return m ? Number(m[1]) : null;
+    };
+    const getArchiveDirUri = async () => {
+        try { return await AsyncStorage.getItem(ARCHIVE_DIR_KEY); } catch (e) { return null; }
+    };
+    const pickArchiveDir = async () => {
+        try {
+            const perm = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+            if (!perm.granted) return null;
+            await AsyncStorage.setItem(ARCHIVE_DIR_KEY, perm.directoryUri).catch(() => { });
+            return perm.directoryUri;
+        } catch (e) { return null; }
+    };
+    // 返回 { list: [{ uri, name, size, where }], scanned }；scanned 为保存目录里读到的条目总数
+    const collectArchiveFiles = async () => {
+        const list = [];
+        let scanned = 0;
+        try {
+            const dir = FileSystem.documentDirectory;
+            const names = await FileSystem.readDirectoryAsync(dir);
+            for (const n of names.filter(isArchiveName)) {
+                let size = 0;
+                try {
+                    const info = await FileSystem.getInfoAsync(dir + n, { size: true });
+                    if (info && info.exists) size = info.size || 0;
+                } catch (e) { }
+                list.push({ uri: dir + n, name: n, size, mtime: archiveTimeFromName(n), where: 'sandbox' });
+            }
+        } catch (e) { }
+        try {
+            const dirUri = await getArchiveDirUri();
+            if (dirUri) {
+                let uris = [];
+                try {
+                    uris = await FileSystem.StorageAccessFramework.readDirectoryAsync(dirUri);
+                } catch (e) {
+                    uris = await FileSystem.readDirectoryAsync(dirUri).catch(() => []);
+                }
+                scanned = (uris || []).length;
+                for (const u of uris || []) {
+                    const n = archiveNameFromUri(u);
+                    if (n) list.push({ uri: u, name: n, size: 0, mtime: archiveTimeFromName(n), where: 'saved' });
+                }
+            }
+        } catch (e) { }
+        // 最新的排前面
+        list.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+        return { list, scanned };
+    };
+    const deleteArchiveFiles = async (uris) => {
+        let done = 0;
+        for (const u of uris || []) {
+            try { await FileSystem.deleteAsync(u, { idempotent: true }); done += 1; } catch (e) { }
+        }
+        return done;
+    };
+    const dropTmp = async (uri) => {
+        try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch (e) { }
     };
 
     useEffect(() => {
@@ -68,6 +148,7 @@ export const AppProvider = ({ children }) => {
                 const savedOptions = await AsyncStorage.getItem('customOptions');
                 const savedThemeBg = await AsyncStorage.getItem('themeBg');
                 const savedNickname = await AsyncStorage.getItem('nickname');
+                const savedNotifPrefs = await AsyncStorage.getItem('notifPrefs');
 
                 if (savedInventory) setInventory(JSON.parse(savedInventory));
                 if (savedHabits) setHabits(JSON.parse(savedHabits));
@@ -96,10 +177,18 @@ export const AppProvider = ({ children }) => {
                     }
                 }
                 setCustomOptions(options);
+                if (savedNotifPrefs) {
+                    try {
+                        const p = JSON.parse(savedNotifPrefs);
+                        setNotifPrefs({ checkIn: p.checkIn !== false, expiring: p.expiring !== false, expired: p.expired !== false });
+                    } catch (e) { /* 偏好读取失败就用默认值 */ }
+                }
                 addLogEntry('Init', `加载本地数据完成，当前物品数量: ${JSON.parse(savedInventory || '[]').length}`);
+                setDataReady(true);
             } catch (e) {
                 console.log('Load error:', e);
                 addLogEntry('Error', `加载本地数据失败: ${e.message}`);
+                setDataReady(true);
             }
         };
         loadData();
@@ -117,6 +206,27 @@ export const AppProvider = ({ children }) => {
             addLogEntry('Error', `保存数据失败: ${e.message}`);
         }
     };
+
+    // 消息提醒总开关：持久化并立刻按新偏好重排通知
+    const updateNotifPrefs = async (patch) => {
+        const next = { ...notifPrefs, ...patch };
+        setNotifPrefs(next);
+        try { await AsyncStorage.setItem('notifPrefs', JSON.stringify(next)); } catch (e) { addLogEntry('Error', '保存提醒设置失败: ' + e.message); }
+        return next;
+    };
+
+    // App 在前台时也要把通知弹出来
+    useEffect(() => { setupNotificationHandler(); }, []);
+
+    // 统一重排入口：启动、增删改条目、打卡、导入、清除、改开关都会落在这里。
+    // 串一个 800ms 防抖，避免连续操作时反复清空重排。
+    useEffect(() => {
+        if (!dataReady) return;
+        const timer = setTimeout(() => {
+            rescheduleAll({ inventory, habits, calendarData, prefs: notifPrefs }).catch(() => {});
+        }, 800);
+        return () => clearTimeout(timer);
+    }, [inventory, habits, calendarData, notifPrefs, dataReady]);
 
     // 偏好设置更新
     const updateCustomOptionList = (key, list) => {
@@ -178,7 +288,7 @@ export const AppProvider = ({ children }) => {
     };
 
     const addLog = (category, text, sub, itemName) => {
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDateStr();
         const timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
         const record = { id: Date.now().toString(), time: timeStr, text, sub, category, item: itemName };
         const newCalendarData = { ...calendarData };
@@ -278,6 +388,12 @@ export const AppProvider = ({ children }) => {
             expireDate: item.noExpire ? '' : (item.expireDate || ''),
             enableCheckIn: item.enableCheckIn !== undefined ? item.enableCheckIn : false,
             associateInventory: item.associateInventory !== undefined ? item.associateInventory : false,
+            // 打卡提醒：开启/重复规则/每周哪几天/多个时间点/提前分钟
+            remindOn: item.remindOn !== undefined ? !!item.remindOn : false,
+            remindRepeat: item.remindRepeat || 'daily',
+            remindWeekdays: Array.isArray(item.remindWeekdays) ? item.remindWeekdays : [],
+            remindTimes: Array.isArray(item.remindTimes) ? item.remindTimes : [],
+            remindAdvance: (item.remindAdvance !== undefined && item.remindAdvance !== null && item.remindAdvance !== '') ? Number(item.remindAdvance) : 0,
             locations: item.locations || '',
         };
     };
@@ -357,7 +473,10 @@ export const AppProvider = ({ children }) => {
         setInventory(newInventory);
         addLog('inventory', `${action} ${Math.abs(amount)}${unit} ${itemName}`, `剩余库存：${newInventory.find(i => i.id === itemId).stock}${unit}`, itemName);
         saveData(newInventory, habits, calendarData, customOptions, themeBg);
-        showToast(`${action} ${Math.abs(amount)}${unit}`);
+        // 消耗后库存归零要顺带提示补货，不能只报一个变化量
+        const after = newInventory.find(i => i.id === itemId);
+        const left = after ? Math.round((after.stock || 0) * 10) / 10 : 0;
+        showToast(left <= 0 ? `${action} ${Math.abs(amount)}${unit}，库存为 0，需补货` : `${action} ${Math.abs(amount)}${unit}`);
     };
 
     // 批量改库存：一次事件循环内多条（文字记库存），避免连续调用 updateStock 时互相覆盖旧 state
@@ -403,7 +522,7 @@ export const AppProvider = ({ children }) => {
     const addHabitRecord = (habitName, tags = '', customTime = null, customDate = null) => {
         const text = `完成 ${habitName} 打卡`;
         const sub = tags ? `标签：${tags}` : '快速打卡';
-        const today = customDate || new Date().toISOString().split('T')[0];
+        const today = customDate || localDateStr();
         const timeStr = customTime || new Date().toLocaleTimeString('zh-CN', { hour12: false });
         const record = { id: Date.now().toString(), time: timeStr, text, sub, category: 'habit', item: habitName };
         const newCalendarData = { ...calendarData };
@@ -415,7 +534,7 @@ export const AppProvider = ({ children }) => {
     };
 
     const addMedicineCheckInRecord = (medName, dose, unit, customTime = null, note = '', customDate = null, associateOverride = undefined) => {
-        const today = customDate || new Date().toISOString().split('T')[0];
+        const today = customDate || localDateStr();
         const timeStr = customTime || new Date().toLocaleTimeString('zh-CN', { hour12: false });
         const targetMed = inventory.find(i => i.name === medName && i.category === '药品');
 
@@ -449,7 +568,7 @@ export const AppProvider = ({ children }) => {
     };
 
     const addItemCheckInRecord = (itemName, amount, unit, customTime = null, note = '', customDate = null, associateOverride = undefined) => {
-        const today = customDate || new Date().toISOString().split('T')[0];
+        const today = customDate || localDateStr();
         const timeStr = customTime || new Date().toLocaleTimeString('zh-CN', { hour12: false });
         const qty = parseFloat(amount);
         const useQty = (isNaN(qty) || qty <= 0) ? 1 : qty;
@@ -561,17 +680,21 @@ export const AppProvider = ({ children }) => {
             if (mode === 'save') {
                 if (Platform.OS === 'android') {
                     const perm = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-                    if (!perm.granted) { showToast('已取消保存'); return; }
+                    if (!perm.granted) { showToast('已取消保存'); await dropTmp(fileUri); return; }
+                    await AsyncStorage.setItem(ARCHIVE_DIR_KEY, perm.directoryUri).catch(() => { });
                     const targetUri = await FileSystem.StorageAccessFramework.createFileAsync(perm.directoryUri, fileName, 'application/json');
                     await FileSystem.writeAsStringAsync(targetUri, content);
+                    await dropTmp(fileUri);
                     showToast('已保存到本地：' + fileName);
                 } else if (await Sharing.isAvailableAsync()) {
                     await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: '保存小家本备份' });
+                    await dropTmp(fileUri);
                 } else { showToast('文件已保存到应用沙盒'); }
                 return;
             }
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: '导出小家本备份' });
+                await dropTmp(fileUri);
             } else { showToast('文件已保存到应用沙盒'); }
         } catch (e) { showToast('导出失败: ' + e.message); }
     };
@@ -598,6 +721,12 @@ export const AppProvider = ({ children }) => {
                             remark: it.remark || '',
                             enableCheckIn: it.enableCheckIn !== undefined ? it.enableCheckIn : false,
                             associateInventory: it.associateInventory !== undefined ? it.associateInventory : false,
+                            // 旧备份没有这些字段，补默认（提醒默认关闭）
+                            remindOn: it.remindOn !== undefined ? !!it.remindOn : false,
+                            remindRepeat: it.remindRepeat || 'daily',
+                            remindWeekdays: Array.isArray(it.remindWeekdays) ? it.remindWeekdays : [],
+                            remindTimes: Array.isArray(it.remindTimes) ? it.remindTimes : [],
+                            remindAdvance: (it.remindAdvance !== undefined && it.remindAdvance !== null && it.remindAdvance !== '') ? Number(it.remindAdvance) : 0,
                         };
                     });
                     // 兼容旧版 customOptions（units/locations → itemUnits/itemLocations）
@@ -633,6 +762,8 @@ export const AppProvider = ({ children }) => {
             inventory, habits, calendarData, customOptions, themeBg, nickname, themeColors, toastMsg, toastVisible, debugLogs, showToast,
             addItem, editItem, deleteItem, updateStock, updateStockBatch, addHabit, editHabit, deleteHabit,
             addHabitRecord, addMedicineCheckInRecord, addItemCheckInRecord, removeLog, addCustomOption, clearAllData, exportData, importData, getItemStatus, updateTheme, updateNickname,
+            notifPrefs, updateNotifPrefs,
+            collectArchiveFiles, deleteArchiveFiles, getArchiveDirUri, pickArchiveDir,
             addLogEntry, exportLogs, deleteRecordWithStockRestore, updateCustomOptionList
         }}>
             {children}

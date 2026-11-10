@@ -44,3 +44,6 @@ yarn-error.*
 backups/
 *.apk
 src/**/*.bak*
+
+# local signing config (never commit)
+keystore.properties

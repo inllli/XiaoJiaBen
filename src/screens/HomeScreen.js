@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, 
 import { AppContext } from '../context/AppContext';
 import { COLORS, SIZES, SHADOWS } from '../theme';
 import AddItemModal from '../components/AddItemModal';
+import { localDateStr } from '../dateUtils';
 
 // 封面轮播：多张封面时每 5 秒从右向左滑动切换一张，单张时静态显示
 // 失效封面（加载报错的本地/网络路径）直接跳过，避免首页把失效项和正常封面混在一起轮播
@@ -79,7 +80,7 @@ export default function HomeScreen({ navigation }) {
     const [editItem, setEditItem] = useState(null);
     const [detailVisible, setDetailVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
-    const [tempStock, setTempStock] = useState(0);
+    const [stockEntry, setStockEntry] = useState('');
     const [quickConsumeVisible, setQuickConsumeVisible] = useState(false);
     const [quickConsumeItem, setQuickConsumeItem] = useState(null);
     const [quickConsumeQty, setQuickConsumeQty] = useState(1);
@@ -148,7 +149,7 @@ export default function HomeScreen({ navigation }) {
     const warnCount = inventory.filter(i => ['warn', 'empty'].includes(getItemStatus(i))).length;
     const dangerCount = inventory.filter(i => ['danger', 'expired'].includes(getItemStatus(i))).length;
 
-    const openDetail = (item) => { const latest = inventory.find(i => i.id === item.id) || item; setSelectedItem(latest); setTempStock(latest.stock || 0); setDetailVisible(true); };
+    const openDetail = (item) => { const latest = inventory.find(i => i.id === item.id) || item; setSelectedItem(latest); setStockEntry('1'); setDetailVisible(true); };
     // 「查看更多」：跳到该物品/药品最近一次有记录的日期（无记录时回到今天）
     const openLatestRecord = () => {
         const name = selectedItem?.name;
@@ -161,9 +162,23 @@ export default function HomeScreen({ navigation }) {
         });
         setDetailVisible(false);
         // filterCategory 用 all：物品的库存记录与药品打卡记录都能显示出来
-        navigation.navigate('日历', { filterItem: name, filterCategory: 'all', date: latestDate || new Date().toISOString().split('T')[0] });
+        navigation.navigate('日历', { filterItem: name, filterCategory: 'all', date: latestDate || localDateStr() });
     };
-    const handleConfirm = () => { if (selectedItem) { const delta = tempStock - selectedItem.stock; if (delta !== 0) updateStock(selectedItem.id, delta, selectedItem.name, selectedItem.unit); setDetailVisible(false); } };
+    // 详情弹窗只填「本次补货/消耗多少」：输入框里只有数字，正数补货、负数消耗，剩余由 updateStock 算
+    const stockNum = parseFloat(stockEntry);
+    const stockDelta = (isNaN(stockNum) || stockNum === 0) ? 0 : stockNum;
+    // 快捷按钮按当前值累加，可以连续点（点三次 +1 就是 3）
+    const applyStockQuick = (step) => {
+        const base = isNaN(stockNum) ? 0 : stockNum;
+        const next = Math.round((base + step) * 100) / 100;
+        setStockEntry(next === 0 ? '' : String(next));
+    };
+    const handleConfirm = () => {
+        if (!selectedItem) return;
+        if (!stockDelta) { setDetailVisible(false); return; }
+        updateStock(selectedItem.id, stockDelta, selectedItem.name, selectedItem.unit);
+        setDetailVisible(false);
+    };
     const openQuickConsume = (item) => { const latest = inventory.find(i => i.id === item.id) || item; setQuickConsumeItem(latest); setQuickConsumeQty(1); setQuickConsumeVisible(true); };
     const handleQuickConsumeConfirm = () => { if (quickConsumeItem) { updateStock(quickConsumeItem.id, -quickConsumeQty, quickConsumeItem.name, quickConsumeItem.unit); setQuickConsumeVisible(false); } };
 
@@ -409,24 +424,28 @@ export default function HomeScreen({ navigation }) {
                             );
                         })()}
                         <View style={[styles.stockControl, { backgroundColor: tc.cardSubBg }]}>
-                            <Text style={[styles.stockText, { color: tc.textMain }]}>剩 {(tempStock || 0).toFixed(1)} {selectedItem?.unit}</Text>
+                            {(() => {
+                                const left = Math.round((selectedItem?.stock || 0) * 10) / 10;
+                                return <Text style={[styles.stockText, { color: left <= 0 ? '#D9534F' : tc.textMain }]}>{left <= 0 ? '库存为 0，需补货' : `剩 ${left} ${selectedItem?.unit}`}</Text>;
+                            })()}
                             <View style={styles.stockInputWrap}>
                                 <TextInput
-                                    style={[styles.stockValueInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain }]}
-                                    keyboardType="decimal-pad"
-                                    value={isNaN(parseFloat(tempStock)) ? '' : String(tempStock)}
+                                    style={[styles.stockValueInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.textMain, width: 120 }]}
+                                    keyboardType="numeric"
+                                    placeholder="0"
+                                    placeholderTextColor={tc.textSub}
+                                    value={stockEntry}
                                     onChangeText={(text) => {
-                                        if (text === '') { setTempStock(0); return; }
-                                        const num = parseFloat(text);
-                                        if (!isNaN(num) && num >= 0) setTempStock(num);
+                                        const clean = text.replace(/[^0-9.-]/g, '');
+                                        if (/^-?\d*\.?\d*$/.test(clean)) setStockEntry(clean);
                                     }}
                                 />
                             </View>
                             <View style={styles.btnGroup}>
-                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => setTempStock(prev => Math.max(0, prev - 0.5))}><Text style={{ color: tc.textMain }}>-0.5</Text></TouchableOpacity>
-                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => setTempStock(prev => Math.max(0, prev - 1))}><Text style={{ color: tc.textMain }}>-1</Text></TouchableOpacity>
-                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => setTempStock(prev => prev + 1)}><Text style={{ color: tc.textMain }}>+1</Text></TouchableOpacity>
-                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => setTempStock(prev => prev + 0.5)}><Text style={{ color: tc.textMain }}>+0.5</Text></TouchableOpacity>
+                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => applyStockQuick(-0.5)}><Text style={{ color: tc.textMain }}>-0.5</Text></TouchableOpacity>
+                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => applyStockQuick(-1)}><Text style={{ color: tc.textMain }}>-1</Text></TouchableOpacity>
+                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => applyStockQuick(1)}><Text style={{ color: tc.textMain }}>+1</Text></TouchableOpacity>
+                                <TouchableOpacity style={[styles.glassBtn, { backgroundColor: tc.inputBg }]} onPress={() => applyStockQuick(0.5)}><Text style={{ color: tc.textMain }}>+0.5</Text></TouchableOpacity>
                             </View>
                         </View>
                         <View style={{ marginTop: 12 }}>
